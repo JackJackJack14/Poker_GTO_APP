@@ -1,11 +1,19 @@
-import { useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type { GtoResponse } from './types';
 import { useGameState } from './hooks/useGameState';
+import { useGrindingHotkeys } from './hooks/useGrindingHotkeys';
 import { analyzeHand } from './lib/api';
+import { boardCardLimit } from './lib/cards';
+import type { CardSelectTarget } from './lib/cardInput';
 import { PokerTable } from './components/PokerTable';
 import { CardSelector } from './components/CardSelector';
 import { GameControls } from './components/GameControls';
-import { GtoAdviceScreen } from './components/GtoAdviceScreen';
+import { HotkeyLegend } from './components/HotkeyLegend';
+import {
+  GtoAdviceScreen,
+  type AnalysisContext,
+} from './components/GtoAdviceScreen';
+import { getPositionLineup, type SeatIndex } from './lib/seatLayout';
 
 export default function App() {
   const game = useGameState();
@@ -13,11 +21,65 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<GtoResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [analysisContext, setAnalysisContext] = useState<AnalysisContext | null>(
+    null,
+  );
+  const [cardTarget, setCardTarget] = useState<CardSelectTarget | null>(null);
+  const [activeSeatIndex, setActiveSeatIndex] = useState<SeatIndex>(0);
+  const betInputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  const positionLineup = useMemo(
+    () => getPositionLineup(game.btnSeatIndex),
+    [game.btnSeatIndex],
+  );
+
+  const boardLimit = boardCardLimit(game.stage);
+
+  const registerBetInput = useCallback(
+    (seatIndex: SeatIndex, el: HTMLInputElement | null) => {
+      betInputRefs.current[seatIndex] = el;
+    },
+    [],
+  );
+
+  const focusBetInput = useCallback((seatIndex: SeatIndex) => {
+    setActiveSeatIndex(seatIndex);
+    requestAnimationFrame(() => {
+      betInputRefs.current[seatIndex]?.focus();
+    });
+  }, []);
+
+  useGrindingHotkeys({
+    enabled: !adviceOpen,
+    cardTarget,
+    onCardTargetChange: setCardTarget,
+    heroCards: game.heroCards,
+    boardCards: game.boardCards,
+    boardLimit,
+    usedCards: game.usedCards,
+    onSelectHero: game.selectHeroCard,
+    onSelectBoard: game.selectBoardCard,
+    activeSeatIndex,
+    seats: game.seats,
+    positions: game.positions,
+    onUpdateSeat: game.updateSeat,
+    focusBetInput,
+  });
 
   const handleAnalyze = async () => {
     const gameState = game.buildGameState();
     if (!gameState) return;
 
+    const context: AnalysisContext = {
+      heroPosition: game.heroPosition,
+      stage: game.stage,
+      pot: game.pot,
+      heroCards: [gameState.heroCards[0], gameState.heroCards[1]],
+      boardCards: gameState.boardCards,
+      positionLineup,
+    };
+
+    setAnalysisContext(context);
     setAdviceOpen(true);
     setLoading(true);
     setResult(null);
@@ -33,9 +95,21 @@ export default function App() {
     }
   };
 
+  const handleReset = () => {
+    game.resetTable();
+    setAdviceOpen(false);
+    setResult(null);
+    setError(null);
+    setAnalysisContext(null);
+    setLoading(false);
+    setCardTarget(null);
+    setActiveSeatIndex(0);
+  };
+
   return (
     <div className="min-h-screen">
-      {/* Header */}
+      <HotkeyLegend />
+
       <header className="border-b border-zinc-800/80 bg-zinc-950/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-3">
@@ -54,6 +128,9 @@ export default function App() {
               Hero: {game.heroPosition}
             </span>
             <span className="rounded-full bg-zinc-800 px-3 py-1 text-xs text-zinc-400">
+              BTN Seat {game.btnSeatIndex + 1}
+            </span>
+            <span className="rounded-full bg-zinc-800 px-3 py-1 text-xs text-zinc-400">
               {game.stage}
             </span>
           </div>
@@ -64,32 +141,40 @@ export default function App() {
         <GameControls
           stage={game.stage}
           pot={game.pot}
+          basePot={game.basePot}
+          streetPot={game.streetPot}
           onStageChange={game.setStage}
-          onPotChange={game.setPot}
-          onReset={game.resetTable}
+          onBasePotChange={game.setBasePot}
+          onReset={handleReset}
         />
 
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
-          {/* Poker Table — 3 cols */}
           <div className="lg:col-span-3">
             <div className="rounded-2xl border border-zinc-800/60 bg-zinc-900/30 p-4 sm:p-6">
               <p className="mb-4 text-center text-xs text-zinc-500">
-                คลิกที่ตำแหน่งเพื่อเลือก Hero · ปรับ Stack / Bet / Fold ได้ที่แต่ละที่นั่ง
+                คลิกเก้าอี้เพื่อย้าย BTN (D) · กด &quot;ตั้ง Hero&quot; เพื่อเลือกตำแหน่งของคุณ ·
+                ป้ายตำแหน่งหมุนตามเข็มนาฬิกา BTN→SB→BB→UTG→MP→CO ·{' '}
+                <span className="text-sky-400">เก้าอี้สีฟ้า = ปุ่มลัด f/c/r</span>
               </p>
               <PokerTable
-                heroPosition={game.heroPosition}
-                positions={game.positions}
+                seats={game.seats}
+                btnSeatIndex={game.btnSeatIndex}
+                heroSeatIndex={game.heroSeatIndex}
+                activeSeatIndex={activeSeatIndex}
                 heroCards={game.heroCards}
                 boardCards={game.boardCards}
                 pot={game.pot}
-                onSelectHero={game.setHeroPosition}
-                onUpdatePosition={game.updatePosition}
-                positionsList={game.positionsList}
+                basePot={game.basePot}
+                positions={game.positions}
+                onSetBtnSeat={game.setBtnSeat}
+                onSetHeroSeat={game.setHeroSeat}
+                onActiveSeatChange={setActiveSeatIndex}
+                onUpdateSeat={game.updateSeat}
+                registerBetInput={registerBetInput}
               />
             </div>
           </div>
 
-          {/* Card Selector — 2 cols */}
           <div className="lg:col-span-2">
             <div className="flex h-full flex-col rounded-2xl border border-zinc-800/60 bg-zinc-900/30 p-4 sm:p-6">
               <CardSelector
@@ -97,6 +182,8 @@ export default function App() {
                 heroCards={game.heroCards}
                 boardCards={game.boardCards}
                 usedCards={game.usedCards}
+                activeTarget={cardTarget}
+                onActiveTargetChange={setCardTarget}
                 onSelectHero={game.selectHeroCard}
                 onSelectBoard={game.selectBoardCard}
               />
@@ -126,6 +213,7 @@ export default function App() {
         result={result}
         loading={loading}
         error={error}
+        context={analysisContext}
         onClose={() => setAdviceOpen(false)}
       />
     </div>

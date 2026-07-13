@@ -1,19 +1,24 @@
 import type { Stage } from '../types';
 import { STAGES } from '../types';
+import { NumericInput } from './NumericInput';
 
 interface GameControlsProps {
   stage: Stage;
   pot: number;
+  basePot: number;
+  streetPot: number;
   onStageChange: (stage: Stage) => void;
-  onPotChange: (pot: number) => void;
+  onBasePotChange: (basePot: number) => void;
   onReset: () => void;
 }
 
 export function GameControls({
   stage,
   pot,
+  basePot,
+  streetPot,
   onStageChange,
-  onPotChange,
+  onBasePotChange,
   onReset,
 }: GameControlsProps) {
   return (
@@ -38,16 +43,27 @@ export function GameControls({
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        <label className="text-xs font-medium text-zinc-400">Pot (BB)</label>
-        <input
-          type="number"
-          min={0}
-          step={0.5}
-          value={pot}
-          onChange={(e) => onPotChange(Math.max(0, Number(e.target.value)))}
-          className="w-20 rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-center font-mono text-sm text-zinc-200"
-        />
+      <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-medium text-zinc-400">Pot (auto)</label>
+          <span className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 font-mono text-sm text-gold">
+            {pot.toFixed(1)} BB
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-medium text-zinc-400">Street Bets</label>
+          <span className="rounded-lg border border-zinc-700/70 bg-zinc-800/70 px-2 py-1 font-mono text-xs text-amber-300">
+            {streetPot.toFixed(1)} BB
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-medium text-zinc-400">Dead Pot</label>
+          <NumericInput
+            value={basePot}
+            onChange={onBasePotChange}
+            className="w-20 rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-center font-mono text-sm text-zinc-200"
+          />
+        </div>
       </div>
 
       <button

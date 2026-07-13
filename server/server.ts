@@ -1,3 +1,6 @@
+/** Windows dev: แก้ SSL certificate issue กับ Google API */
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express, { type Request, type Response } from 'express';
@@ -24,6 +27,13 @@ function isValidGameState(body: unknown): body is GameState {
   if (!Array.isArray(gs.heroCards) || gs.heroCards.length !== 2) return false;
   if (!Array.isArray(gs.boardCards) || gs.boardCards.length > 5) return false;
   if (typeof gs.pot !== 'number' || gs.pot < 0) return false;
+  if (gs.bigBlind !== undefined && typeof gs.bigBlind !== 'number') return false;
+  if (gs.betContext !== undefined) {
+    const bc = gs.betContext;
+    if (typeof bc.toCall !== 'number' || typeof bc.potOddsLine !== 'string') {
+      return false;
+    }
+  }
   if (!gs.positions || typeof gs.positions !== 'object') return false;
 
   for (const pos of POSITIONS) {
@@ -32,6 +42,12 @@ function isValidGameState(body: unknown): body is GameState {
     if (typeof state.stack !== 'number' || state.stack < 0) return false;
     if (typeof state.betSize !== 'number' || state.betSize < 0) return false;
     if (typeof state.folded !== 'boolean') return false;
+    if (state.station !== undefined && typeof state.station !== 'boolean') {
+      return false;
+    }
+    if (state.tight !== undefined && typeof state.tight !== 'boolean') {
+      return false;
+    }
   }
 
   return true;

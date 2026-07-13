@@ -1,19 +1,18 @@
-import { useState } from 'react';
 import type { Card, Stage } from '../types';
 import { STAGES } from '../types';
+import type { CardSelectTarget } from '../lib/cardInput';
 import { FULL_DECK, boardCardLimit, formatCard, isRedSuit } from '../lib/cards';
 import { PlayingCard } from './PlayingCard';
 
-type SelectTarget =
-  | { type: 'hero'; slot: 0 | 1 }
-  | { type: 'board'; index: number }
-  | null;
+export type { CardSelectTarget };
 
 interface CardSelectorProps {
   stage: Stage;
   heroCards: [Card | null, Card | null];
   boardCards: (Card | null)[];
   usedCards: Set<Card>;
+  activeTarget: CardSelectTarget | null;
+  onActiveTargetChange: (target: CardSelectTarget | null) => void;
   onSelectHero: (slot: 0 | 1, card: Card | null) => void;
   onSelectBoard: (index: number, card: Card | null) => void;
 }
@@ -23,10 +22,11 @@ export function CardSelector({
   heroCards,
   boardCards,
   usedCards,
+  activeTarget,
+  onActiveTargetChange,
   onSelectHero,
   onSelectBoard,
 }: CardSelectorProps) {
-  const [activeTarget, setActiveTarget] = useState<SelectTarget>(null);
   const boardLimit = boardCardLimit(stage);
 
   const handleCardPick = (card: Card) => {
@@ -39,7 +39,7 @@ export function CardSelector({
     } else {
       onSelectBoard(activeTarget.index, card);
     }
-    setActiveTarget(null);
+    onActiveTargetChange(null);
   };
 
   const clearTarget = () => {
@@ -49,7 +49,16 @@ export function CardSelector({
     } else {
       onSelectBoard(activeTarget.index, null);
     }
-    setActiveTarget(null);
+    onActiveTargetChange(null);
+  };
+
+  const toggleTarget = (target: CardSelectTarget) => {
+    const isSame =
+      activeTarget?.type === target.type &&
+      (target.type === 'hero'
+        ? activeTarget.slot === target.slot
+        : activeTarget.index === target.index);
+    onActiveTargetChange(isSame ? null : target);
   };
 
   const isCardDisabled = (card: Card) => {
@@ -63,7 +72,6 @@ export function CardSelector({
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Hero hand */}
       <section>
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-zinc-400">
           ไพ่ในมือ Hero
@@ -78,19 +86,12 @@ export function CardSelector({
               selected={
                 activeTarget?.type === 'hero' && activeTarget.slot === slot
               }
-              onClick={() =>
-                setActiveTarget(
-                  activeTarget?.type === 'hero' && activeTarget.slot === slot
-                    ? null
-                    : { type: 'hero', slot },
-                )
-              }
+              onClick={() => toggleTarget({ type: 'hero', slot })}
             />
           ))}
         </div>
       </section>
 
-      {/* Board */}
       {boardLimit > 0 && (
         <section>
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-zinc-400">
@@ -106,13 +107,7 @@ export function CardSelector({
                 selected={
                   activeTarget?.type === 'board' && activeTarget.index === i
                 }
-                onClick={() =>
-                  setActiveTarget(
-                    activeTarget?.type === 'board' && activeTarget.index === i
-                      ? null
-                      : { type: 'board', index: i },
-                  )
-                }
+                onClick={() => toggleTarget({ type: 'board', index: i })}
               />
             ))}
           </div>
@@ -125,7 +120,6 @@ export function CardSelector({
         </p>
       )}
 
-      {/* Deck grid */}
       <section>
         <div className="mb-2 flex items-center justify-between">
           <h3 className="text-xs font-semibold uppercase tracking-widest text-zinc-400">
@@ -138,6 +132,7 @@ export function CardSelector({
                 {activeTarget.type === 'hero'
                   ? `Hero ใบที่ ${activeTarget.slot + 1}`
                   : `Board ใบที่ ${activeTarget.index + 1}`}
+                <span className="ml-1 text-zinc-500">· พิมพ์ AsKd ได้</span>
               </span>
               <button
                 type="button"
@@ -152,7 +147,7 @@ export function CardSelector({
 
         {!activeTarget && (
           <p className="mb-2 text-xs text-zinc-500">
-            คลิกช่องไพ่ด้านบนก่อน แล้วเลือกจากกริดด้านล่าง
+            คลิกช่องไพ่ด้านบน แล้วพิมพ์รหัสไพ่ (เช่น AsKd) หรือเลือกจากกริด
           </p>
         )}
 
@@ -187,7 +182,6 @@ export function CardSelector({
         </div>
       </section>
 
-      {/* Stage quick ref */}
       <div className="flex flex-wrap gap-1">
         {STAGES.map((s) => (
           <span

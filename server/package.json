@@ -4,9 +4,9 @@
   "description": "",
   "main": "dist/server.js",
   "scripts": {
-    "dev": "ts-node server.ts",
+    "dev": "cross-env NODE_OPTIONS=--use-system-ca NODE_TLS_REJECT_UNAUTHORIZED=0 tsx watch server.ts",
     "build": "tsc",
-    "start": "node dist/server/server.js",
+    "start": "cross-env NODE_OPTIONS=--use-system-ca NODE_TLS_REJECT_UNAUTHORIZED=0 node dist/server/server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -23,8 +23,10 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^26.1.1",
+    "cross-env": "^10.1.0",
     "esbuild": "^0.28.1",
     "ts-node": "^10.9.2",
+    "tsx": "^4.23.1",
     "typescript": "^7.0.2"
   }
 }

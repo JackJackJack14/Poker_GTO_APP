@@ -1,16 +1,19 @@
-import type { Action, GtoResponse } from '../types';
+import type { GtoResponse, Position, Stage } from '../types';
 
-const ACTION_COLORS: Record<Action, string> = {
-  FOLD: 'bg-red-900/40 text-red-300 ring-red-700/50',
-  CHECK: 'bg-zinc-700/60 text-zinc-200 ring-zinc-500/50',
-  CALL: 'bg-blue-900/40 text-blue-300 ring-blue-700/50',
-  RAISE: 'bg-emerald-900/40 text-emerald-300 ring-emerald-700/50',
-};
+export interface AnalysisContext {
+  heroPosition: Position;
+  stage: Stage;
+  pot: number;
+  heroCards: [string, string];
+  boardCards: string[];
+  positionLineup: { seatIndex: number; position: Position }[];
+}
 
 interface GtoAdviceScreenProps {
   result: GtoResponse | null;
   loading: boolean;
   error: string | null;
+  context: AnalysisContext | null;
   onClose: () => void;
   open: boolean;
 }
@@ -59,10 +62,67 @@ function EquityRing({ equity }: { equity: number }) {
   );
 }
 
+function PositionLineupPanel({
+  context,
+}: {
+  context: AnalysisContext;
+}) {
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+      <p className="mb-3 text-xs uppercase tracking-widest text-zinc-500">
+        ตำแหน่งบนโต๊ะ (หมุนตาม BTN)
+      </p>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        {context.positionLineup.map(({ seatIndex, position }) => (
+          <div
+            key={seatIndex}
+            className={`rounded-lg px-3 py-2 text-center ring-1 ${
+              position === context.heroPosition
+                ? 'bg-gold/15 text-gold ring-gold/40'
+                : position === 'BTN'
+                  ? 'bg-white/10 text-white ring-white/20'
+                  : 'bg-zinc-800/60 text-zinc-300 ring-zinc-700/50'
+            }`}
+          >
+            <p className="text-[10px] text-zinc-500">Seat {seatIndex + 1}</p>
+            <p className="font-mono text-sm font-bold">{position}</p>
+            {position === context.heroPosition && (
+              <p className="text-[9px] text-gold">HERO</p>
+            )}
+            {position === 'BTN' && (
+              <p className="text-[9px] text-zinc-400">DEALER</p>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2 text-xs text-zinc-400">
+        <span className="rounded-full bg-zinc-800 px-2 py-1">
+          Hero: <strong className="text-emerald-400">{context.heroPosition}</strong>
+        </span>
+        <span className="rounded-full bg-zinc-800 px-2 py-1">
+          Street: <strong className="text-zinc-200">{context.stage}</strong>
+        </span>
+        <span className="rounded-full bg-zinc-800 px-2 py-1">
+          Pot: <strong className="text-gold">{context.pot.toFixed(1)} BB</strong>
+        </span>
+        <span className="rounded-full bg-zinc-800 px-2 py-1">
+          Hand: <strong className="text-zinc-200">{context.heroCards.join(' ')}</strong>
+        </span>
+        {context.boardCards.length > 0 && (
+          <span className="rounded-full bg-zinc-800 px-2 py-1">
+            Board: <strong className="text-zinc-200">{context.boardCards.join(' ')}</strong>
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function GtoAdviceScreen({
   result,
   loading,
   error,
+  context,
   onClose,
   open,
 }: GtoAdviceScreenProps) {
@@ -70,19 +130,20 @@ export function GtoAdviceScreen({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/70 backdrop-blur-sm"
         onClick={onClose}
       />
 
-      {/* Panel */}
-      <div className="relative z-10 w-full max-w-lg overflow-hidden rounded-2xl border border-zinc-700/60 bg-gradient-to-b from-zinc-900 to-zinc-950 shadow-2xl">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
+      <div className="relative z-10 max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-zinc-700/60 bg-gradient-to-b from-zinc-900 to-zinc-950 shadow-2xl">
+        <div className="sticky top-0 flex items-center justify-between border-b border-zinc-800 bg-zinc-900/95 px-6 py-4 backdrop-blur-sm">
           <div>
             <h2 className="text-lg font-bold text-white">GTO Analysis</h2>
-            <p className="text-xs text-zinc-400">คำแนะนำจาก AI Coach</p>
+            <p className="text-xs text-zinc-400">
+              {context
+                ? `Hero ${context.heroPosition} · ${context.stage} · ${context.pot.toFixed(1)} BB`
+                : 'คำแนะนำจาก AI Coach'}
+            </p>
           </div>
           <button
             type="button"
@@ -96,84 +157,50 @@ export function GtoAdviceScreen({
         </div>
 
         <div className="px-6 py-5">
+          {context && <PositionLineupPanel context={context} />}
+
           {loading && (
-            <div className="flex flex-col items-center gap-4 py-10">
+            <div className="mt-5 flex flex-col items-center gap-4 py-10">
               <div className="h-12 w-12 animate-spin rounded-full border-4 border-zinc-700 border-t-gold" />
               <p className="text-sm text-zinc-400">กำลังวิเคราะห์ด้วย AI...</p>
             </div>
           )}
 
           {error && !loading && (
-            <div className="rounded-xl border border-red-800/50 bg-red-950/30 p-4 text-center">
+            <div className="mt-5 rounded-xl border border-red-800/50 bg-red-950/30 p-4 text-center">
               <p className="text-sm font-medium text-red-300">{error}</p>
               <p className="mt-1 text-xs text-red-400/70">
-                ตรวจสอบว่า Backend รันอยู่และ GEMINI_API_KEY ถูกต้อง
+                {error.includes('Gemini') || error.includes('GEMINI')
+                  ? 'แก้ที่ server/.env → GEMINI_API_KEY แล้ว restart Backend'
+                  : 'ตรวจสอบว่า Backend รันที่พอร์ต 3001 (npm run dev ในโฟลเดอร์ server)'}
               </p>
             </div>
           )}
 
           {result && !loading && !error && (
-            <div className="flex flex-col gap-5">
-              <div className="flex items-center gap-6">
-                <EquityRing equity={result.equity} />
-                <div className="flex-1">
-                  <p className="mb-1 text-xs uppercase tracking-widest text-gold">
-                    คำแนะนำ
+            <div className="mt-5 flex flex-col gap-4">
+              {result.rakeTrapWarning && (
+                <div
+                  role="alert"
+                  className="rounded-lg border border-red-600 bg-red-950/80 px-4 py-3 text-center shadow-[0_0_12px_rgba(220,38,38,0.35)]"
+                >
+                  <p className="text-xs font-bold uppercase tracking-widest text-red-300">
+                    Rake-Trap Warning
                   </p>
-                  <p className="text-lg font-semibold leading-snug text-white">
-                    {result.advice}
+                  <p className="mt-1 text-sm font-medium text-red-100">
+                    {result.rakeTrapMessage ??
+                      'สถานการณ์เสี่ยงติดกับดัก Rake — พิจารณา Fold หรือ 3-Bet แทน Call'}
                   </p>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
-                <p className="mb-2 text-xs uppercase tracking-widest text-zinc-500">
-                  อธิบายเชิงกลยุทธ์
-                </p>
-                <p className="text-sm leading-relaxed text-zinc-300">
-                  {result.explanation}
-                </p>
-              </div>
-
-              {result.suggestedActions.length > 0 && (
-                <div>
-                  <p className="mb-3 text-xs uppercase tracking-widest text-zinc-500">
-                    Suggested Actions
-                  </p>
-                  <div className="flex flex-col gap-2">
-                    {result.suggestedActions.map((sa, i) => (
-                      <div
-                        key={i}
-                        className={`flex items-center justify-between rounded-lg px-4 py-2.5 ring-1 ${ACTION_COLORS[sa.action]}`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <span className="font-mono text-sm font-bold">
-                            {sa.action}
-                          </span>
-                          {sa.size !== undefined && (
-                            <span className="text-xs opacity-80">
-                              {sa.size} BB
-                            </span>
-                          )}
-                        </div>
-                        {sa.frequency !== undefined && (
-                          <div className="flex items-center gap-2">
-                            <div className="h-1.5 w-20 overflow-hidden rounded-full bg-black/30">
-                              <div
-                                className="h-full rounded-full bg-white/60"
-                                style={{ width: `${sa.frequency * 100}%` }}
-                              />
-                            </div>
-                            <span className="font-mono text-xs">
-                              {(sa.frequency * 100).toFixed(0)}%
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
                 </div>
               )}
+              <div className="flex items-start gap-5">
+                <EquityRing equity={result.equity} />
+                <div className="min-w-0 flex-1 rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+                  <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-zinc-200">
+                    {result.text}
+                  </pre>
+                </div>
+              </div>
             </div>
           )}
         </div>

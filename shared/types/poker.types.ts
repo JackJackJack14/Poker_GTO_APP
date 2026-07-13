@@ -31,6 +31,10 @@ export interface PositionState {
   stack: number;
   betSize: number;
   folded: boolean;
+  /** Calling Station — คอลไม่เลิก */
+  station?: boolean;
+  /** Tight-Fold / Nit — หมอบบ่อย */
+  tight?: boolean;
 }
 
 /** การกระทำที่แนะนำจาก GTO */
@@ -55,17 +59,28 @@ export interface GameState {
   pot: number;
   /** ขนาด Big Blind (default 1) */
   bigBlind?: number;
+  /** บริบทเดิมพันบน street ปัจจุบัน (คำนวณจาก betSize ของทุกตำแหน่ง) */
+  betContext?: {
+    maxStreetBet: number;
+    heroBetSize: number;
+    toCall: number;
+    facingBetSize: number;
+    potOddsPercent: number | null;
+    mdfPercent: number | null;
+    potOddsLine: string;
+  };
 }
 
-/** ผลลัพธ์ JSON ที่คาดหวังจาก AI GTO Coach */
+/** ผลลัพธ์ GTO Coach — Plain Text ไทย + equity สำหรับ UI */
 export interface GtoResponse {
   /** Equity โดยประมาณ 0–100 */
   equity: number;
-  /** คำแนะนำสั้นๆ เป็นภาษาไทย */
-  advice: string;
-  /** อธิบายเชิงกลยุทธ์ (EV, Pot Odds, MDF, Range) เป็นภาษาไทย */
-  explanation: string;
-  suggestedActions: SuggestedAction[];
+  /** คำตอบ Plain Text 5 บรรทัด (ไม่มี Markdown) */
+  text: string;
+  /** สถานการณ์เสี่ยง Rake-Trap */
+  rakeTrapWarning: boolean;
+  /** ข้อความเตือน Rake-Trap (ถ้ามี) */
+  rakeTrapMessage?: string;
 }
 
 /** Request body สำหรับ POST /api/analyze */

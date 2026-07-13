@@ -26,19 +26,22 @@ export function PlayingCard({
 }: PlayingCardProps) {
   const base =
     'relative flex flex-col items-center justify-center rounded-lg border font-mono font-semibold transition-all select-none';
+  const interactive = Boolean(onClick) && !disabled;
+  const Tag = interactive ? 'button' : 'div';
+  const tagProps = interactive
+    ? { type: 'button' as const, onClick, disabled }
+    : {};
 
   if (!card) {
     return (
-      <button
-        type="button"
-        onClick={onClick}
-        disabled={disabled}
+      <Tag
+        {...tagProps}
         className={`${base} ${sizeClasses[size]} border-dashed border-zinc-600 bg-zinc-800/50 text-zinc-500 ${
-          onClick && !disabled ? 'hover:border-gold hover:text-gold cursor-pointer' : ''
+          interactive ? 'hover:border-gold hover:text-gold cursor-pointer' : ''
         } ${selected ? 'ring-2 ring-gold' : ''}`}
       >
         {placeholder}
-      </button>
+      </Tag>
     );
   }
 
@@ -47,18 +50,16 @@ export function PlayingCard({
   const symbol = formatCard(card).slice(rank.length);
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
+    <Tag
+      {...tagProps}
       className={`${base} ${sizeClasses[size]} bg-gradient-to-b from-zinc-100 to-zinc-200 border-zinc-300 shadow-md ${
         red ? 'text-red-600' : 'text-zinc-900'
-      } ${onClick && !disabled ? 'hover:scale-105 hover:shadow-lg cursor-pointer' : ''} ${
+      } ${interactive ? 'hover:scale-105 hover:shadow-lg cursor-pointer' : ''} ${
         selected ? 'ring-2 ring-gold scale-105' : ''
       } ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
     >
       <span className="leading-none">{rank}</span>
       <span className="leading-none text-lg">{symbol}</span>
-    </button>
+    </Tag>
   );
 }

@@ -1,23 +1,51 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { Card, GameState, Position, PositionState, Stage } from '../types';
-import { POSITIONS } from '../types';
 import { boardCardLimit } from '../lib/cards';
+import {
+  calculateTotalPot,
+  resetStreetBets,
+  sumStreetBets,
+} from '../lib/potEngine';
+import { computeBetContext } from '../../shared/lib/betContext';
+import {
+  buildPositionsMap,
+  CLOCKWISE_FROM_BTN,
+  getPositionLabel,
+  type SeatIndex,
+} from '../lib/seatLayout';
 
 function createDefaultPositions(): Record<Position, PositionState> {
   return {
-    UTG: { stack: 100, betSize: 0, folded: false },
-    MP: { stack: 100, betSize: 0, folded: false },
-    CO: { stack: 100, betSize: 0, folded: false },
-    BTN: { stack: 100, betSize: 0, folded: false },
-    SB: { stack: 99.5, betSize: 0.5, folded: false },
-    BB: { stack: 99, betSize: 1, folded: false },
+    UTG: { stack: 100, betSize: 0, folded: false, station: false, tight: false },
+    MP: { stack: 100, betSize: 0, folded: false, station: false, tight: false },
+    CO: { stack: 100, betSize: 0, folded: false, station: false, tight: false },
+    BTN: { stack: 100, betSize: 0, folded: false, station: false, tight: false },
+    SB: { stack: 99.5, betSize: 0.5, folded: false, station: false, tight: false },
+    BB: { stack: 99, betSize: 1, folded: false, station: false, tight: false },
   };
 }
 
+function createEmptySeats(): PositionState[] {
+  return Array.from({ length: 6 }, () => ({
+    stack: 100,
+    betSize: 0,
+    folded: false,
+    station: false,
+    tight: false,
+  }));
+}
+
+function createDefaultSeats(): PositionState[] {
+  const byPosition = createDefaultPositions();
+  return CLOCKWISE_FROM_BTN.map((position) => byPosition[position]);
+}
+
 export function useGameState() {
-  const [heroPosition, setHeroPosition] = useState<Position>('BTN');
+  const [btnSeatIndex, setBtnSeatIndex] = useState<SeatIndex>(0);
+  const [heroSeatIndex, setHeroSeatIndex] = useState<SeatIndex>(0);
+  const [seats, setSeats] = useState<PositionState[]>(createDefaultSeats);
   const [stage, setStage] = useState<Stage>('FLOP');
-  const [positions, setPositions] = useState(createDefaultPositions);
+  const [basePot, setBasePot] = useState(4.5);
   const [heroCards, setHeroCards] = useState<[Card | null, Card | null]>([
     'As',
     'Kd',
@@ -29,7 +57,23 @@ export function useGameState() {
     null,
     null,
   ]);
-  const [pot, setPot] = useState(6);
+
+  const positions = useMemo(
+    () => buildPositionsMap(seats, btnSeatIndex),
+    [seats, btnSeatIndex],
+  );
+
+  const heroPosition = useMemo(
+    () => getPositionLabel(heroSeatIndex, btnSeatIndex),
+    [heroSeatIndex, btnSeatIndex],
+  );
+
+  const pot = useMemo(
+    () => calculateTotalPot(basePot, positions),
+    [basePot, positions],
+  );
+
+  const streetPot = useMemo(() => sumStreetBets(positions), [positions]);
 
   const usedCards = useMemo(() => {
     const cards = new Set<Card>();
@@ -42,45 +86,63 @@ export function useGameState() {
     return cards;
   }, [heroCards, boardCards]);
 
-  const updatePosition = useCallback(
-    (pos: Position, patch: Partial<PositionState>) => {
-      setPositions((prev) => ({
-        ...prev,
-        [pos]: { ...prev[pos], ...patch },
-      }));
+  const updateSeat = useCallback(
+    (seatIndex: SeatIndex, patch: Partial<PositionState>) => {
+      setSeats((prev) =>
+        prev.map((seat, index) =>
+          index === seatIndex ? { ...seat, ...patch } : seat,
+        ),
+      );
     },
     [],
   );
 
-  const selectHeroCard = useCallback(
-    (slot: 0 | 1, card: Card | null) => {
-      setHeroCards((prev) => {
-        const next: [Card | null, Card | null] = [...prev];
-        next[slot] = card;
-        return next;
-      });
-    },
-    [],
-  );
-
-  const selectBoardCard = useCallback(
-    (index: number, card: Card | null) => {
-      setBoardCards((prev) => {
-        const next = [...prev];
-        next[index] = card;
-        return next;
-      });
-    },
-    [],
-  );
-
-  const handleStageChange = useCallback((newStage: Stage) => {
-    setStage(newStage);
-    const limit = boardCardLimit(newStage);
-    setBoardCards((prev) =>
-      prev.map((c, i) => (i < limit ? c : null)),
-    );
+  const setBtnSeat = useCallback((seatIndex: SeatIndex) => {
+    setBtnSeatIndex(seatIndex);
   }, []);
+
+  const setHeroSeat = useCallback((seatIndex: SeatIndex) => {
+    setHeroSeatIndex(seatIndex);
+  }, []);
+
+  const selectHeroCard = useCallback((slot: 0 | 1, card: Card | null) => {
+    setHeroCards((prev) => {
+      const next: [Card | null, Card | null] = [...prev];
+      next[slot] = card;
+      return next;
+    });
+  }, []);
+
+  const selectBoardCard = useCallback((index: number, card: Card | null) => {
+    setBoardCards((prev) => {
+      const next = [...prev];
+      next[index] = card;
+      return next;
+    });
+  }, []);
+
+  const handleStageChange = useCallback(
+    (newStage: Stage) => {
+      setSeats((prevSeats) => {
+        const prevPositions = buildPositionsMap(prevSeats, btnSeatIndex);
+        setBasePot((base) => base + sumStreetBets(prevPositions));
+        const resetPositions = resetStreetBets(prevPositions);
+        return prevSeats.map((seat, seatIndex) => {
+          const label = getPositionLabel(seatIndex, btnSeatIndex);
+          const reset = resetPositions[label];
+          return {
+            ...reset,
+            station: seat.station ?? false,
+            tight: seat.tight ?? false,
+          };
+        });
+      });
+      setStage(newStage);
+      const limit = boardCardLimit(newStage);
+      setBoardCards((prev) => prev.map((c, i) => (i < limit ? c : null)));
+    },
+    [btnSeatIndex],
+  );
 
   const buildGameState = useCallback((): GameState | null => {
     if (!heroCards[0] || !heroCards[1]) {
@@ -104,6 +166,15 @@ export function useGameState() {
       boardCards: activeBoard,
       pot,
       bigBlind: 1,
+      betContext: computeBetContext({
+        heroPosition,
+        stage,
+        positions,
+        heroCards: [heroCards[0], heroCards[1]],
+        boardCards: activeBoard,
+        pot,
+        bigBlind: 1,
+      }),
     };
   }, [heroPosition, stage, positions, heroCards, boardCards, pot]);
 
@@ -120,32 +191,38 @@ export function useGameState() {
   }, [heroCards, boardCards, stage]);
 
   const resetTable = useCallback(() => {
-    setPositions(createDefaultPositions());
-    setPot(6);
-    setStage('FLOP');
-    setHeroCards(['As', 'Kd']);
-    setBoardCards(['Qh', 'Jc', '2s', null, null]);
-    setHeroPosition('BTN');
+    setBtnSeatIndex(0);
+    setHeroSeatIndex(0);
+    setStage('PREFLOP');
+    setBasePot(0);
+    setSeats(createEmptySeats());
+    setHeroCards([null, null]);
+    setBoardCards([null, null, null, null, null]);
   }, []);
 
   return {
+    btnSeatIndex,
+    heroSeatIndex,
     heroPosition,
-    setHeroPosition,
+    seats,
+    setBtnSeat,
+    setHeroSeat,
     stage,
     setStage: handleStageChange,
     positions,
-    updatePosition,
+    updateSeat,
     heroCards,
     selectHeroCard,
     boardCards,
     selectBoardCard,
     pot,
-    setPot,
+    basePot,
+    streetPot,
+    setBasePot,
     usedCards,
     buildGameState,
     validationError,
     resetTable,
-    positionsList: POSITIONS,
   };
 }
 
