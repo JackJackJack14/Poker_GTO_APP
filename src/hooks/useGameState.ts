@@ -200,6 +200,16 @@ export function useGameState() {
     setBoardCards([null, null, null, null, null]);
   }, []);
 
+  /** ล้างยอดเดิมพันสตรีทปัจจุบันเป็น 0 — ไม่แตะ basePot (พ็อตรวมสตรีทก่อน) */
+  const resetStreetActions = useCallback(() => {
+    setSeats((prev) =>
+      prev.map((seat) => ({
+        ...seat,
+        betSize: 0,
+      })),
+    );
+  }, []);
+
   return {
     btnSeatIndex,
     heroSeatIndex,
@@ -223,6 +233,7 @@ export function useGameState() {
     buildGameState,
     validationError,
     resetTable,
+    resetStreetActions,
   };
 }
 

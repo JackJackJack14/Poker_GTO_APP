@@ -47,6 +47,19 @@ function nextCardTarget(
   return null;
 }
 
+function firstEmptyTarget(
+  heroCards: [Card | null, Card | null],
+  boardCards: (Card | null)[],
+  boardLimit: number,
+): CardSelectTarget | null {
+  if (!heroCards[0]) return { type: 'hero', slot: 0 };
+  if (!heroCards[1]) return { type: 'hero', slot: 1 };
+  for (let i = 0; i < boardLimit; i++) {
+    if (!boardCards[i]) return { type: 'board', index: i };
+  }
+  return null;
+}
+
 export interface GrindingHotkeysConfig {
   enabled?: boolean;
   cardTarget: CardSelectTarget | null;
@@ -64,6 +77,9 @@ export interface GrindingHotkeysConfig {
   focusBetInput: (seatIndex: SeatIndex) => void;
 }
 
+/**
+ * Stable hotkeys via refs — ไม่ rebind listener ทุกครั้งที่ state ไพ่เปลี่ยน (กันหน่วงตอน grinding)
+ */
 export function useGrindingHotkeys({
   enabled = true,
   cardTarget,
@@ -81,54 +97,87 @@ export function useGrindingHotkeys({
   focusBetInput,
 }: GrindingHotkeysConfig) {
   const cardBufferRef = useRef('');
+  const stateRef = useRef({
+    cardTarget,
+    heroCards,
+    boardCards,
+    boardLimit,
+    usedCards,
+    activeSeatIndex,
+    seats,
+    positions,
+  });
 
-  const applyCard = useCallback(
-    (card: Card, target: CardSelectTarget) => {
-      if (!canUseCard(card, target, heroCards, boardCards, usedCards)) return false;
+  stateRef.current = {
+    cardTarget,
+    heroCards,
+    boardCards,
+    boardLimit,
+    usedCards,
+    activeSeatIndex,
+    seats,
+    positions,
+  };
 
-      if (target.type === 'hero') {
-        onSelectHero(target.slot, card);
-      } else {
-        onSelectBoard(target.index, card);
-      }
+  const callbacksRef = useRef({
+    onCardTargetChange,
+    onSelectHero,
+    onSelectBoard,
+    onUpdateSeat,
+    focusBetInput,
+  });
+  callbacksRef.current = {
+    onCardTargetChange,
+    onSelectHero,
+    onSelectBoard,
+    onUpdateSeat,
+    focusBetInput,
+  };
 
-      onCardTargetChange(nextCardTarget(target, boardLimit));
-      return true;
-    },
-    [
-      heroCards,
-      boardCards,
-      usedCards,
-      onSelectHero,
-      onSelectBoard,
-      onCardTargetChange,
-      boardLimit,
-    ],
-  );
-
-  const applyCheckOrCall = useCallback(() => {
-    const state = seats[activeSeatIndex];
-    if (state.folded) return;
-
-    const maxBet = getMaxStreetBet(positions);
-    const mode: StreetMode = getSeatStreetMode(state, maxBet);
-
-    if (mode === 'facing') {
-      onUpdateSeat(activeSeatIndex, { betSize: maxBet });
-      return;
-    }
-
-    if (mode === 'open') {
-      onUpdateSeat(activeSeatIndex, { betSize: 0 });
-    }
-  }, [activeSeatIndex, seats, positions, onUpdateSeat]);
-
-  const applyFold = useCallback(() => {
-    onUpdateSeat(activeSeatIndex, { folded: true });
-  }, [activeSeatIndex, onUpdateSeat]);
+  useEffect(() => {
+    cardBufferRef.current = '';
+  }, [cardTarget]);
 
   useEffect(() => {
     if (!enabled) return;
+
+    const applyCardAt = (card: Card, target: CardSelectTarget): boolean => {
+      const s = stateRef.current;
+      const cb = callbacksRef.current;
+      if (!canUseCard(card, target, s.heroCards, s.boardCards, s.usedCards)) {
+        return false;
+      }
+      if (target.type === 'hero') {
+        cb.onSelectHero(target.slot, card);
+      } else {
+        cb.onSelectBoard(target.index, card);
+      }
+      const next = nextCardTarget(target, s.boardLimit);
+      cb.onCardTargetChange(next);
+
+      const nextHero: [Card | null, Card | null] =
+        target.type === 'hero'
+          ? [
+              target.slot === 0 ? card : s.heroCards[0],
+              target.slot === 1 ? card : s.heroCards[1],
+            ]
+          : s.heroCards;
+      const nextBoard =
+        target.type === 'board'
+          ? s.boardCards.map((c, i) => (i === target.index ? card : c))
+          : s.boardCards;
+      const nextUsed = new Set(s.usedCards);
+      nextUsed.add(card);
+
+      stateRef.current = {
+        ...stateRef.current,
+        cardTarget: next,
+        heroCards: nextHero,
+        boardCards: nextBoard,
+        usedCards: nextUsed,
+      };
+      return true;
+    };
 
     const flushBuffer = () => {
       let buf = cardBufferRef.current;
@@ -139,115 +188,141 @@ export function useGrindingHotkeys({
           continue;
         }
         buf = buf.slice(2);
-        if (cardTarget) {
-          applyCard(card, cardTarget);
+        let target = stateRef.current.cardTarget;
+        if (!target) {
+          target = firstEmptyTarget(
+            stateRef.current.heroCards,
+            stateRef.current.boardCards,
+            stateRef.current.boardLimit,
+          );
+          if (target) {
+            callbacksRef.current.onCardTargetChange(target);
+            stateRef.current = { ...stateRef.current, cardTarget: target };
+          }
+        }
+        if (target) {
+          applyCardAt(card, target);
         }
       }
       cardBufferRef.current = buf;
-    };
-
-    const handleCardChar = (char: string) => {
-      if (!cardTarget) return;
-      const lower = char.toLowerCase();
-      cardBufferRef.current += lower;
-
-      if (cardBufferRef.current.length >= 2) {
-        flushBuffer();
-      }
-    };
-
-    const handleCardPaste = (text: string) => {
-      if (!cardTarget) return;
-      cardBufferRef.current = '';
-      let target: CardSelectTarget | null = cardTarget;
-
-      for (const card of parseCardSequence(text)) {
-        if (!target) break;
-        if (!canUseCard(card, target, heroCards, boardCards, usedCards)) continue;
-        if (target.type === 'hero') {
-          onSelectHero(target.slot, card);
-        } else {
-          onSelectBoard(target.index, card);
-        }
-        target = nextCardTarget(target, boardLimit);
-      }
-
-      onCardTargetChange(target);
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.repeat) return;
 
       const inField = isTypingInField(e.target);
+      const key = e.key;
 
-      if (cardTarget && !inField && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (isCardInputChar(e.key)) {
-          e.preventDefault();
-          handleCardChar(e.key);
-          return;
+      // Card typing — auto-pick first empty slot if no target
+      if (
+        !inField &&
+        key.length === 1 &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        isCardInputChar(key)
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (!stateRef.current.cardTarget) {
+          const auto = firstEmptyTarget(
+            stateRef.current.heroCards,
+            stateRef.current.boardCards,
+            stateRef.current.boardLimit,
+          );
+          if (auto) {
+            callbacksRef.current.onCardTargetChange(auto);
+            stateRef.current = { ...stateRef.current, cardTarget: auto };
+          }
         }
+
+        if (!stateRef.current.cardTarget) return;
+
+        cardBufferRef.current += key.toLowerCase();
+        if (cardBufferRef.current.length >= 2) {
+          flushBuffer();
+        }
+        return;
       }
 
       if (inField) return;
 
-      const key = e.key.toLowerCase();
+      const lower = key.toLowerCase();
+      const s = stateRef.current;
+      const cb = callbacksRef.current;
 
-      if (key === 'f') {
+      if (lower === 'f') {
         e.preventDefault();
-        applyFold();
+        cb.onUpdateSeat(s.activeSeatIndex, { folded: true });
         return;
       }
 
-      if (key === 'c') {
+      if (lower === 'c') {
         e.preventDefault();
-        applyCheckOrCall();
+        const seat = s.seats[s.activeSeatIndex];
+        if (seat.folded) return;
+        const maxBet = getMaxStreetBet(s.positions);
+        const mode: StreetMode = getSeatStreetMode(seat, maxBet);
+        if (mode === 'facing') {
+          cb.onUpdateSeat(s.activeSeatIndex, { betSize: maxBet });
+        } else if (mode === 'open') {
+          cb.onUpdateSeat(s.activeSeatIndex, { betSize: 0 });
+        }
         return;
       }
 
-      if (key === 'r') {
+      if (lower === 'r') {
         e.preventDefault();
-        focusBetInput(activeSeatIndex);
+        cb.focusBetInput(s.activeSeatIndex);
         return;
       }
 
-      if (key >= '1' && key <= '6') {
+      if (lower >= '1' && lower <= '6') {
         e.preventDefault();
-        focusBetInput((Number(key) - 1) as SeatIndex);
+        cb.focusBetInput((Number(lower) - 1) as SeatIndex);
       }
     };
 
     const onPaste = (e: ClipboardEvent) => {
-      if (!cardTarget || isTypingInField(e.target)) return;
+      if (isTypingInField(e.target)) return;
       const text = e.clipboardData?.getData('text') ?? '';
-      if (!parseCardSequence(text).length) return;
+      const cards = parseCardSequence(text);
+      if (!cards.length) return;
       e.preventDefault();
-      handleCardPaste(text);
+
+      cardBufferRef.current = '';
+      let target =
+        stateRef.current.cardTarget ??
+        firstEmptyTarget(
+          stateRef.current.heroCards,
+          stateRef.current.boardCards,
+          stateRef.current.boardLimit,
+        );
+
+      for (const card of cards) {
+        if (!target) break;
+        if (
+          !canUseCard(
+            card,
+            target,
+            stateRef.current.heroCards,
+            stateRef.current.boardCards,
+            stateRef.current.usedCards,
+          )
+        ) {
+          continue;
+        }
+        applyCardAt(card, target);
+        target = stateRef.current.cardTarget;
+      }
     };
 
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('paste', onPaste);
+    window.addEventListener('keydown', onKeyDown, { capture: true });
+    window.addEventListener('paste', onPaste, { capture: true });
     return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('paste', onPaste);
+      window.removeEventListener('keydown', onKeyDown, { capture: true });
+      window.removeEventListener('paste', onPaste, { capture: true });
     };
-  }, [
-    enabled,
-    cardTarget,
-    heroCards,
-    boardCards,
-    boardLimit,
-    usedCards,
-    onSelectHero,
-    onSelectBoard,
-    onCardTargetChange,
-    applyCard,
-    applyFold,
-    applyCheckOrCall,
-    activeSeatIndex,
-    focusBetInput,
-  ]);
-
-  useEffect(() => {
-    cardBufferRef.current = '';
-  }, [cardTarget]);
+  }, [enabled]);
 }

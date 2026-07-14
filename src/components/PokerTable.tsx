@@ -6,7 +6,6 @@ import {
   getMaxStreetBet,
   getSeatActionLabel,
   getSeatStreetMode,
-  getToCall,
   type StreetMode,
 } from '../lib/potEngine';
 import {
@@ -17,6 +16,7 @@ import {
 } from '../lib/seatLayout';
 
 interface SeatProps {
+  seatIndex: SeatIndex;
   position: Position;
   state: PositionState;
   isHero: boolean;
@@ -25,6 +25,7 @@ interface SeatProps {
   heroCards?: [Card | null, Card | null];
   maxStreetBet: number;
   streetMode: StreetMode;
+  pot: number;
   onSetButton: () => void;
   onSetHero: () => void;
   onActivate: () => void;
@@ -33,15 +34,22 @@ interface SeatProps {
   style: React.CSSProperties;
 }
 
-function actionButtonClass(active: boolean): string {
-  return `rounded px-2 py-0.5 text-[10px] font-semibold transition-colors ${
+const QUICK_BET_PERCENTS = [33, 50, 75] as const;
+
+function roundBb(n: number): number {
+  return Math.round(Math.max(0, n) * 10) / 10;
+}
+
+function btnClass(active: boolean): string {
+  return `rounded px-1.5 py-0.5 text-[9px] font-semibold leading-none transition-colors ${
     active
-      ? 'bg-gold/20 text-gold ring-1 ring-gold/50'
+      ? 'bg-gold/25 text-gold ring-1 ring-gold/50'
       : 'bg-zinc-700 text-zinc-300 hover:bg-zinc-600'
   }`;
 }
 
 function Seat({
+  seatIndex,
   position,
   state,
   isHero,
@@ -50,6 +58,7 @@ function Seat({
   heroCards,
   maxStreetBet,
   streetMode,
+  pot,
   onSetButton,
   onSetHero,
   onActivate,
@@ -57,206 +66,210 @@ function Seat({
   betInputRef,
   style,
 }: SeatProps) {
-  const toCall = getToCall(state, maxStreetBet);
   const actionLabel = getSeatActionLabel(state, maxStreetBet);
   const isChecked =
     !state.folded &&
     ((streetMode === 'open' && state.betSize === 0) ||
       (streetMode === 'matched' && state.betSize === maxStreetBet));
 
-  const applyWager = (amount: number) => {
-    if (state.folded) return;
-
-    if (streetMode === 'open') {
-      onUpdate({ betSize: Math.max(0, amount) });
-      return;
-    }
-
-    const minRaiseTotal = maxStreetBet + 1;
-    const next = Math.max(amount, minRaiseTotal);
-    onUpdate({ betSize: next });
-  };
+  const zIndex = isActive ? 40 : isHero ? 30 : 10 + seatIndex;
 
   return (
-    <div className="absolute -translate-x-1/2 -translate-y-1/2" style={style}>
+    <div
+      className="absolute"
+      style={{ ...style, zIndex, width: '7.25rem' }}
+      onClick={onActivate}
+      onFocus={onActivate}
+    >
       <div
-        className={`group relative flex flex-col items-center gap-1.5 rounded-xl p-2 transition-all ${
+        className={`flex max-h-[9.5rem] w-full flex-col overflow-hidden rounded-lg border bg-zinc-950/95 px-1.5 py-1 shadow-md backdrop-blur-sm ${
           isHero
-            ? 'ring-2 ring-gold shadow-[0_0_20px_rgba(212,168,83,0.35)]'
+            ? 'border-gold ring-1 ring-gold/60'
             : isActive
-              ? 'ring-2 ring-sky-400/80 shadow-[0_0_12px_rgba(56,189,248,0.25)]'
-              : isButton
-                ? 'ring-2 ring-white/30'
-                : 'hover:ring-1 hover:ring-zinc-500'
+              ? 'border-sky-400 ring-1 ring-sky-400/50'
+              : 'border-zinc-700/80'
         } ${state.folded ? 'opacity-45' : ''}`}
       >
-        <button
-          type="button"
-          onClick={onSetButton}
-          title="คลิกเพื่อย้าย BTN (Dealer) มาที่นี่"
-          className="flex w-full flex-col items-center gap-1.5"
-        >
-          {isButton && (
-            <span className="absolute -top-2 left-1/2 flex h-5 w-5 -translate-x-1/2 items-center justify-center rounded-full bg-white text-[10px] font-bold text-zinc-900 shadow-md">
-              D
-            </span>
-          )}
-
+        {/* Row 1: position + dealer + hero toggle */}
+        <div className="flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSetButton();
+            }}
+            title="ย้าย BTN"
+            className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[8px] font-bold ${
+              isButton
+                ? 'bg-white text-zinc-900'
+                : 'bg-zinc-800 text-zinc-500 hover:bg-zinc-700'
+            }`}
+          >
+            D
+          </button>
           <div
-            className={`rounded-full px-3 py-0.5 text-xs font-bold tracking-wider ${
+            className={`min-w-0 flex-1 truncate rounded px-1 py-0.5 text-center text-[10px] font-bold tracking-wide ${
               isHero
                 ? 'bg-gold text-zinc-900'
-                : position === 'BTN'
-                  ? 'bg-white text-zinc-900'
-                  : 'bg-zinc-800 text-zinc-300 border border-zinc-600'
+                : 'bg-zinc-800 text-zinc-200'
             }`}
           >
             {position}
-            {isHero && <span className="ml-1 text-[10px] font-normal">HERO</span>}
+            {isHero ? ' ★' : ''}
           </div>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSetHero();
+            }}
+            className={`shrink-0 rounded px-1 py-0.5 text-[8px] ${
+              isHero
+                ? 'text-emerald-300'
+                : 'text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            H
+          </button>
+        </div>
 
-          {isHero && heroCards && (
-            <div className="flex gap-1">
+        {/* Row 2: cards (hero only) + stack/bet */}
+        <div className="mt-0.5 flex items-center gap-1">
+          {isHero && heroCards ? (
+            <div className="flex shrink-0 gap-0.5">
               {heroCards.map((c, i) =>
                 c ? (
                   <PlayingCard key={i} card={c} size="sm" />
                 ) : (
                   <div
                     key={i}
-                    className="flex h-12 w-9 items-center justify-center rounded-lg border border-dashed border-zinc-600 bg-zinc-800/60 text-xs text-zinc-500"
+                    className="flex h-10 w-7 items-center justify-center rounded border border-dashed border-zinc-600 bg-zinc-800/60 text-[9px] text-zinc-500"
                   >
                     ?
                   </div>
                 ),
               )}
             </div>
-          )}
-
-          <div className="flex flex-col items-center gap-0.5 text-[11px]">
-            <span className="font-mono text-emerald-400">
-              {state.stack.toFixed(1)} BB
-            </span>
+          ) : null}
+          <div className="min-w-0 flex-1 text-right leading-tight">
+            <div className="font-mono text-[10px] text-emerald-400">
+              {state.stack.toFixed(0)}
+              <span className="text-[8px] text-zinc-500"> BB</span>
+            </div>
             {state.betSize > 0 && (
-              <span className="rounded bg-amber-900/60 px-1.5 py-0.5 font-mono text-amber-300">
-                in {state.betSize.toFixed(1)} BB
-              </span>
+              <div className="font-mono text-[9px] text-amber-300">
+                in {state.betSize.toFixed(1)}
+              </div>
             )}
             {actionLabel && !state.folded && (
-              <span className="rounded bg-sky-900/50 px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-sky-200">
+              <div className="truncate text-[8px] font-bold text-sky-300">
                 {actionLabel}
-              </span>
+              </div>
+            )}
+            {state.folded && (
+              <div className="text-[8px] font-bold text-red-400">FOLD</div>
             )}
           </div>
+        </div>
 
-          {state.folded && (
-            <span className="absolute -top-1 -right-1 rounded bg-red-900/80 px-1.5 py-0.5 text-[10px] font-bold text-red-300">
-              FOLD
-            </span>
-          )}
-        </button>
-
-        <button
-          type="button"
-          onClick={onSetHero}
-          className={`mt-0.5 rounded px-2 py-0.5 text-[9px] font-medium transition-colors ${
-            isHero
-              ? 'bg-emerald-900/50 text-emerald-300 ring-1 ring-emerald-700'
-              : 'bg-zinc-800 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300'
-          }`}
+        {/* Row 3: Fold / Call|Check — horizontal */}
+        <div
+          className="mt-0.5 flex flex-wrap items-center gap-0.5"
+          onClick={(e) => e.stopPropagation()}
         >
-          {isHero ? '★ Hero' : 'ตั้ง Hero'}
-        </button>
-      </div>
-
-      <div
-        className="mt-1 flex w-[7.5rem] flex-col items-center gap-1"
-        onClick={(e) => {
-          e.stopPropagation();
-          onActivate();
-        }}
-        onFocus={onActivate}
-      >
-        <div className="flex flex-wrap justify-center gap-1">
           <button
             type="button"
             onClick={() => onUpdate({ folded: !state.folded })}
-            className={`rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
-              state.folded
-                ? 'bg-red-900/50 text-red-300 ring-1 ring-red-700'
-                : 'bg-zinc-700 text-zinc-300 hover:bg-zinc-600'
-            }`}
+            className={btnClass(state.folded)}
           >
-            {state.folded ? 'Unfold' : 'Fold'}
+            {state.folded ? 'Un' : 'Fold'}
           </button>
-
           {!state.folded && streetMode !== 'facing' && (
             <button
               type="button"
               onClick={() =>
                 onUpdate({ betSize: streetMode === 'open' ? 0 : state.betSize })
               }
-              className={actionButtonClass(isChecked)}
+              className={btnClass(isChecked)}
             >
-              Check
+              Chk
             </button>
           )}
-
           {!state.folded && streetMode === 'facing' && (
             <button
               type="button"
               onClick={() => onUpdate({ betSize: maxStreetBet })}
-              className={actionButtonClass(state.betSize === maxStreetBet)}
+              className={btnClass(state.betSize === maxStreetBet)}
+              title={`Call ${maxStreetBet.toFixed(1)}`}
             >
-              Call {toCall.toFixed(1)}
+              Call
             </button>
           )}
         </div>
 
+        {/* Row 4: Bet/Raise input + % — horizontal compact */}
         {!state.folded && (
-          <div className="flex w-full items-center gap-1">
-            <label className="w-8 shrink-0 text-[9px] text-zinc-500">
-              {streetMode === 'facing' || streetMode === 'matched' ? 'Raise' : 'Bet'}
-            </label>
+          <div
+            className="mt-0.5 flex items-center gap-0.5"
+            onClick={(e) => e.stopPropagation()}
+          >
             <NumericInput
               ref={betInputRef}
               value={state.betSize}
-              onChange={applyWager}
-              className="w-full rounded border border-zinc-600 bg-zinc-800 px-1 py-0.5 text-center font-mono text-[10px] text-zinc-200"
+              onChange={(amount) => {
+                if (state.folded) return;
+                onUpdate({ betSize: Math.max(0, amount) });
+              }}
+              className="min-w-0 flex-1 rounded border border-zinc-600 bg-zinc-800 px-0.5 py-0.5 text-center font-mono text-[9px] text-zinc-200"
             />
+            {QUICK_BET_PERCENTS.map((pct) => (
+              <button
+                key={pct}
+                type="button"
+                onClick={() =>
+                  onUpdate({ betSize: roundBb((pot * pct) / 100) })
+                }
+                className="shrink-0 rounded bg-zinc-800 px-1 py-0.5 text-[8px] font-semibold text-amber-300/90 ring-1 ring-zinc-700 hover:bg-amber-900/40"
+              >
+                {pct}
+              </button>
+            ))}
           </div>
         )}
 
-        <div className="flex w-full items-center gap-1">
-          <label className="w-8 shrink-0 text-[9px] text-zinc-500">Stack</label>
+        {/* Row 5: stack + tendencies — single compact line */}
+        <div
+          className="mt-0.5 flex items-center gap-0.5"
+          onClick={(e) => e.stopPropagation()}
+        >
           <NumericInput
             value={state.stack}
             onChange={(stack) => onUpdate({ stack })}
-            className="w-full rounded border border-zinc-600 bg-zinc-800 px-1 py-0.5 text-center font-mono text-[10px] text-zinc-200"
+            className="min-w-0 flex-1 rounded border border-zinc-700 bg-zinc-900 px-0.5 py-0.5 text-center font-mono text-[8px] text-zinc-400"
           />
+          {!isHero && (
+            <>
+              <label className="flex items-center gap-0.5 text-[7px] text-zinc-500" title="Station">
+                <input
+                  type="checkbox"
+                  checked={state.station ?? false}
+                  onChange={(e) => onUpdate({ station: e.target.checked })}
+                  className="h-2 w-2 accent-amber-500"
+                />
+                S
+              </label>
+              <label className="flex items-center gap-0.5 text-[7px] text-zinc-500" title="Tight">
+                <input
+                  type="checkbox"
+                  checked={state.tight ?? false}
+                  onChange={(e) => onUpdate({ tight: e.target.checked })}
+                  className="h-2 w-2 accent-sky-500"
+                />
+                T
+              </label>
+            </>
+          )}
         </div>
-
-        {!isHero && (
-          <div className="flex w-full flex-col gap-0.5 border-t border-zinc-700/50 pt-1">
-            <label className="flex cursor-pointer items-center gap-1 text-[8px] text-zinc-400">
-              <input
-                type="checkbox"
-                checked={state.station ?? false}
-                onChange={(e) => onUpdate({ station: e.target.checked })}
-                className="h-2.5 w-2.5 rounded border-zinc-600 accent-amber-500"
-              />
-              Station (คอลไม่เลิก)
-            </label>
-            <label className="flex cursor-pointer items-center gap-1 text-[8px] text-zinc-400">
-              <input
-                type="checkbox"
-                checked={state.tight ?? false}
-                onChange={(e) => onUpdate({ tight: e.target.checked })}
-                className="h-2.5 w-2.5 rounded border-zinc-600 accent-sky-500"
-              />
-              Tight (หมอบบ่อย)
-            </label>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -300,26 +313,29 @@ export function PokerTable({
   const streetPot = pot - basePot;
 
   return (
-    <div className="relative mx-auto aspect-[16/11] w-full max-w-2xl">
-      <div className="absolute inset-[8%] rounded-[50%] bg-gradient-to-br from-felt-mid via-felt-dark to-felt-light shadow-[inset_0_0_60px_rgba(0,0,0,0.5),0_0_40px_rgba(0,0,0,0.6)] ring-4 ring-amber-900/40">
-        <div className="absolute inset-3 rounded-[50%] border-2 border-amber-800/30" />
+    /* Wrapper: position relative — fixed 6-max frame */
+    <div className="relative mx-auto aspect-[5/4] w-full max-w-3xl">
+      {/* Felt oval — center only, seats stay outside ring */}
+      <div className="pointer-events-none absolute inset-[18%_14%] rounded-[50%] bg-gradient-to-br from-felt-mid via-felt-dark to-felt-light shadow-[inset_0_0_50px_rgba(0,0,0,0.55),0_0_30px_rgba(0,0,0,0.45)] ring-[3px] ring-amber-900/45">
+        <div className="absolute inset-2 rounded-[50%] border border-amber-800/25" />
 
-        <div className="absolute left-1/2 top-[38%] -translate-x-1/2 -translate-y-1/2 text-center">
-          <div className="rounded-full bg-zinc-900/70 px-5 py-2 ring-1 ring-gold/30 backdrop-blur-sm">
-            <p className="text-[10px] uppercase tracking-widest text-zinc-400">
+        {/* Pot + board centered on felt */}
+        <div className="absolute left-1/2 top-[34%] z-[1] w-max max-w-[90%] -translate-x-1/2 -translate-y-1/2 text-center">
+          <div className="rounded-full bg-zinc-950/75 px-4 py-1.5 ring-1 ring-gold/35 backdrop-blur-sm">
+            <p className="text-[9px] uppercase tracking-widest text-zinc-400">
               Total Pot
             </p>
-            <p className="font-mono text-xl font-bold text-gold">
+            <p className="font-mono text-lg font-bold leading-tight text-gold sm:text-xl">
               {pot.toFixed(1)} BB
             </p>
-            <p className="mt-0.5 text-[9px] text-zinc-500">
+            <p className="text-[8px] text-zinc-500">
               Street {streetPot.toFixed(1)} + Dead {basePot.toFixed(1)}
             </p>
           </div>
         </div>
 
         {visibleBoard.length > 0 && (
-          <div className="absolute left-1/2 top-[55%] flex -translate-x-1/2 gap-1.5">
+          <div className="absolute left-1/2 top-[58%] z-[1] flex -translate-x-1/2 -translate-y-1/2 gap-1">
             {visibleBoard.map((card) => (
               <PlayingCard key={card} card={card} size="md" />
             ))}
@@ -327,22 +343,22 @@ export function PokerTable({
         )}
       </div>
 
+      {/* 6 locked absolute seat pods */}
       {Array.from({ length: SEAT_COUNT }, (_, index) => {
         const seatIndex = index as SeatIndex;
-        const seatState = seats[seatIndex];
-        const position = getPositionLabel(seatIndex, btnSeatIndex);
-
         return (
           <Seat
             key={seatIndex}
-            position={position}
-            state={seatState}
+            seatIndex={seatIndex}
+            position={getPositionLabel(seatIndex, btnSeatIndex)}
+            state={seats[seatIndex]}
             isHero={seatIndex === heroSeatIndex}
             isButton={seatIndex === btnSeatIndex}
             isActive={seatIndex === activeSeatIndex}
             heroCards={seatIndex === heroSeatIndex ? heroCards : undefined}
             maxStreetBet={maxStreetBet}
-            streetMode={getSeatStreetMode(seatState, maxStreetBet)}
+            streetMode={getSeatStreetMode(seats[seatIndex], maxStreetBet)}
+            pot={pot}
             onSetButton={() => onSetBtnSeat(seatIndex)}
             onSetHero={() => onSetHeroSeat(seatIndex)}
             onActivate={() => onActiveSeatChange(seatIndex)}

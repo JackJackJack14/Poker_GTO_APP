@@ -165,6 +165,27 @@ export function detectDrawTags(
     }
   }
 
+  if (!tags.includes('gutshot') && !tags.includes('nut-gutshot')) {
+    const known = new Set(allRanks);
+    for (const window of [
+      [14, 5, 4, 3, 2],
+      ...Array.from({ length: 9 }, (_, i) => [
+        i + 2,
+        i + 3,
+        i + 4,
+        i + 5,
+        i + 6,
+      ]),
+    ]) {
+      const present = window.filter((r) => known.has(r));
+      const missing = window.filter((r) => !known.has(r));
+      if (present.length === 4 && missing.length === 1) {
+        tags.push('gutshot');
+        break;
+      }
+    }
+  }
+
   if (tags.some((t) => t.includes('draw') || t.includes('gutshot') || t === 'open-ended')) {
     tags.push('has-draw');
   }

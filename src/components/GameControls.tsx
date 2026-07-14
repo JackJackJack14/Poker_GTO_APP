@@ -69,9 +69,13 @@ export function GameControls({
       <button
         type="button"
         onClick={onReset}
-        className="ml-auto rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:border-zinc-500 hover:text-zinc-200"
+        title="ล้างไพ่ / พ็อต / Actions ทั้งหมด — เริ่มแฮนด์ใหม่ทันที"
+        className="ml-auto flex items-center gap-1.5 rounded-lg border border-red-800/70 bg-red-950/50 px-3.5 py-2 text-xs font-bold tracking-wide text-red-200 shadow-sm transition-colors hover:border-red-500 hover:bg-red-900/60 hover:text-white"
       >
-        รีเซ็ตโต๊ะ
+        <span className="text-sm leading-none" aria-hidden>
+          ⟲
+        </span>
+        ล้างข้อมูลแฮนด์ (Reset Table)
       </button>
     </div>
   );

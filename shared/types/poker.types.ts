@@ -75,12 +75,23 @@ export interface GameState {
 export interface GtoResponse {
   /** Equity โดยประมาณ 0–100 */
   equity: number;
-  /** คำตอบ Plain Text 5 บรรทัด (ไม่มี Markdown) */
+  /**
+   * EV สุทธิ (BB) จากสูตร:
+   * EV = (Equity * Total Pot) - ((1 - Equity) * Call Size)
+   */
+  ev: number;
+  /** สถานการณ์ Preflop cascading (ถ้ามี) */
+  priorAction?: string;
+  /** คำตอบ Plain Text (ไม่มี Markdown) */
   text: string;
   /** สถานการณ์เสี่ยง Rake-Trap */
   rakeTrapWarning: boolean;
   /** ข้อความเตือน Rake-Trap (ถ้ามี) */
   rakeTrapMessage?: string;
+  /** มีการหัก Dirty Outs จาก equity */
+  dirtyOutsWarning?: boolean;
+  /** บรรทัดเตือน Dirty Outs แบบเต็ม (แสดงบน UI โดยตรง) */
+  dirtyOutsAlert?: string;
 }
 
 /** Request body สำหรับ POST /api/analyze */

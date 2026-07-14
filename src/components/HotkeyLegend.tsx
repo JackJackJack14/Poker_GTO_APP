@@ -32,7 +32,7 @@ export function HotkeyLegend() {
         </button>
       </div>
 
-      <p className="mb-1.5 font-semibold text-zinc-300">ไพ่ (คลิกช่องก่อน)</p>
+      <p className="mb-1.5 font-semibold text-zinc-300">ไพ่ (พิมพ์เลยได้)</p>
       <ul className="mb-2 space-y-0.5 pl-1">
         <li>
           <kbd className="text-gold">AsKd</kbd> → เลือกไพ่ติดกัน
@@ -43,6 +43,7 @@ export function HotkeyLegend() {
         <li>
           <kbd className="text-zinc-300">s h d c</kbd> = ♠ ♥ ♦ ♣
         </li>
+        <li className="text-zinc-500">ไม่ต้องคลิกช่อง — ระบบโฟกัสช่องว่างให้อัตโนมัติ</li>
       </ul>
 
       <p className="mb-1.5 font-semibold text-zinc-300">Action (เลือกเก้าอี้)</p>

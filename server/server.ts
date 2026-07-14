@@ -1,11 +1,8 @@
-/** Windows dev: แก้ SSL certificate issue กับ Google API */
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express, { type Request, type Response } from 'express';
 import path from 'path';
-import { analyzeGameState } from './services/gemini';
+import { analyzeGameState } from './services/localGtoEngine';
 import type { AnalyzeRequest, AnalyzeResponse, GameState } from './types';
 import { POSITIONS, STAGES } from './types';
 
@@ -54,10 +51,14 @@ function isValidGameState(body: unknown): body is GameState {
 }
 
 app.get('/api/health', (_req: Request, res: Response) => {
-  res.json({ status: 'ok', service: 'poker-gto-advisor' });
+  res.json({
+    status: 'ok',
+    service: 'poker-gto-advisor',
+    engine: 'local-math',
+  });
 });
 
-app.post('/api/analyze', async (req: Request, res: Response<AnalyzeResponse>) => {
+app.post('/api/analyze', (req: Request, res: Response<AnalyzeResponse>) => {
   try {
     const { gameState } = req.body as AnalyzeRequest;
 
@@ -70,8 +71,7 @@ app.post('/api/analyze', async (req: Request, res: Response<AnalyzeResponse>) =>
       return;
     }
 
-    const data = await analyzeGameState(gameState);
-
+    const data = analyzeGameState(gameState);
     res.json({ success: true, data });
   } catch (error) {
     const message =
@@ -82,5 +82,5 @@ app.post('/api/analyze', async (req: Request, res: Response<AnalyzeResponse>) =>
 });
 
 app.listen(PORT, () => {
-  console.log(`Poker GTO Advisor API running on http://localhost:${PORT}`);
+  console.log(`Poker GTO Advisor API (Local Math Engine) on http://localhost:${PORT}`);
 });

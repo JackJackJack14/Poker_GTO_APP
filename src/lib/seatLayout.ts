@@ -15,14 +15,23 @@ export const CLOCKWISE_FROM_BTN: readonly Position[] = [
 
 export type SeatIndex = 0 | 1 | 2 | 3 | 4 | 5;
 
-/** ตำแหน่งเก้าอี้บนโต๊ะ (เข็มนาฬิกา เริ่มจาก BTN ด้านล่าง) */
+/**
+ * พิกัดเก้าอี้กายภาพคงที่ 6-Max (เมื่อ BTN อยู่ seat 0)
+ * 0 BTN ล่างกลาง · 1 SB ซ้ายล่าง · 2 BB ซ้ายบน · 3 UTG บนกลาง · 4 MP ขวาบน · 5 CO ขวาล่าง
+ */
 export const PHYSICAL_SEAT_LAYOUT: readonly CSSProperties[] = [
-  { left: '50%', top: '92%' }, // 0 — BTN default
-  { left: '12%', top: '58%' }, // 1 — SB
-  { left: '8%', top: '22%' }, // 2 — BB
-  { left: '50%', top: '6%' }, // 3 — UTG
-  { left: '88%', top: '22%' }, // 4 — MP
-  { left: '92%', top: '58%' }, // 5 — CO
+  // 0 — BTN / Hero: ด้านล่างตรงกลาง
+  { left: '50%', bottom: '0%', top: 'auto', right: 'auto', transform: 'translateX(-50%)' },
+  // 1 — SB: ด้านซ้ายล่าง
+  { left: '1%', bottom: '18%', top: 'auto', right: 'auto', transform: 'none' },
+  // 2 — BB: ด้านซ้ายบน
+  { left: '1%', top: '14%', bottom: 'auto', right: 'auto', transform: 'none' },
+  // 3 — UTG: ด้านบนตรงกลาง
+  { left: '50%', top: '0%', bottom: 'auto', right: 'auto', transform: 'translateX(-50%)' },
+  // 4 — MP: ด้านขวาบน
+  { right: '1%', top: '14%', bottom: 'auto', left: 'auto', transform: 'none' },
+  // 5 — CO: ด้านขวาล่าง
+  { right: '1%', bottom: '18%', top: 'auto', left: 'auto', transform: 'none' },
 ];
 
 export function getPositionLabel(

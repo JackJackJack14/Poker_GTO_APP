@@ -16,6 +16,9 @@ interface GtoAdviceScreenProps {
   context: AnalysisContext | null;
   onClose: () => void;
   open: boolean;
+  canRecordActual?: boolean;
+  actualFlash?: string | null;
+  onRecordActual?: (outcome: 'win' | 'lose') => void;
 }
 
 function EquityRing({ equity }: { equity: number }) {
@@ -125,6 +128,9 @@ export function GtoAdviceScreen({
   context,
   onClose,
   open,
+  canRecordActual = false,
+  actualFlash = null,
+  onRecordActual,
 }: GtoAdviceScreenProps) {
   if (!open) return null;
 
@@ -138,11 +144,11 @@ export function GtoAdviceScreen({
       <div className="relative z-10 max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-zinc-700/60 bg-gradient-to-b from-zinc-900 to-zinc-950 shadow-2xl">
         <div className="sticky top-0 flex items-center justify-between border-b border-zinc-800 bg-zinc-900/95 px-6 py-4 backdrop-blur-sm">
           <div>
-            <h2 className="text-lg font-bold text-white">GTO Analysis</h2>
+            <h2 className="text-lg font-bold text-white">ความน่าจะเป็น</h2>
             <p className="text-xs text-zinc-400">
               {context
                 ? `Hero ${context.heroPosition} · ${context.stage} · ${context.pot.toFixed(1)} BB`
-                : 'คำแนะนำจาก AI Coach'}
+                : 'Local Range & Bluff Analyzer'}
             </p>
           </div>
           <button
@@ -162,7 +168,7 @@ export function GtoAdviceScreen({
           {loading && (
             <div className="mt-5 flex flex-col items-center gap-4 py-10">
               <div className="h-12 w-12 animate-spin rounded-full border-4 border-zinc-700 border-t-gold" />
-              <p className="text-sm text-zinc-400">กำลังวิเคราะห์ด้วย AI...</p>
+              <p className="text-sm text-zinc-400">กำลังคำนวณความน่าจะเป็น...</p>
             </div>
           )}
 
@@ -170,15 +176,27 @@ export function GtoAdviceScreen({
             <div className="mt-5 rounded-xl border border-red-800/50 bg-red-950/30 p-4 text-center">
               <p className="text-sm font-medium text-red-300">{error}</p>
               <p className="mt-1 text-xs text-red-400/70">
-                {error.includes('Gemini') || error.includes('GEMINI')
-                  ? 'แก้ที่ server/.env → GEMINI_API_KEY แล้ว restart Backend'
-                  : 'ตรวจสอบว่า Backend รันที่พอร์ต 3001 (npm run dev ในโฟลเดอร์ server)'}
+                {/quota|โควตา|429|rate.?limit/i.test(error)
+                  ? 'โควตาฟรีเต็มชั่วคราว — รอสักครู่แล้วลองใหม่ หรือเปลี่ยน GEMINI_MODEL ใน server/.env'
+                  : /API_KEY|api key|หมดอายุ/i.test(error)
+                    ? 'แก้ที่ server/.env → GEMINI_API_KEY แล้ว restart Backend'
+                    : 'ตรวจสอบว่า Backend รันที่พอร์ต 3001 (npm run dev ในโฟลเดอร์ server)'}
               </p>
             </div>
           )}
 
           {result && !loading && !error && (
             <div className="mt-5 flex flex-col gap-4">
+              {result.dirtyOutsWarning && result.dirtyOutsAlert && (
+                <div
+                  role="alert"
+                  className="rounded-lg border-2 border-amber-500 bg-amber-950/90 px-4 py-3 text-center shadow-[0_0_16px_rgba(245,158,11,0.45)]"
+                >
+                  <p className="text-sm font-bold tracking-wide text-amber-100">
+                    {result.dirtyOutsAlert}
+                  </p>
+                </div>
+              )}
               {result.rakeTrapWarning && (
                 <div
                   role="alert"
@@ -195,12 +213,60 @@ export function GtoAdviceScreen({
               )}
               <div className="flex items-start gap-5">
                 <EquityRing equity={result.equity} />
-                <div className="min-w-0 flex-1 rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
-                  <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-zinc-200">
-                    {result.text}
-                  </pre>
+                <div className="min-w-0 flex-1 space-y-3">
+                  <div
+                    className={`rounded-lg px-3 py-2 text-center font-mono text-sm font-bold ring-1 ${
+                      result.ev >= 0
+                        ? 'bg-emerald-950/50 text-emerald-300 ring-emerald-700/50'
+                        : 'bg-red-950/50 text-red-300 ring-red-700/50'
+                    }`}
+                  >
+                    💰 EV สุทธิ: {result.ev >= 0 ? '+' : ''}
+                    {result.ev.toFixed(2)} BB
+                    {result.priorAction && (
+                      <span className="mt-0.5 block text-[10px] font-medium text-zinc-400">
+                        {result.priorAction}
+                      </span>
+                    )}
+                  </div>
+                  <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+                    <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-zinc-200">
+                      {result.text}
+                    </pre>
+                  </div>
                 </div>
               </div>
+
+              {onRecordActual && (
+                <div className="rounded-xl border border-zinc-700/60 bg-zinc-950/60 p-3">
+                  <p className="mb-2 text-center text-[11px] text-zinc-400">
+                    บันทึกผลจริงท้ายแฮนด์ → อัปเดตเส้นเงินจริงบนกราฟ
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      disabled={!canRecordActual}
+                      onClick={() => onRecordActual('win')}
+                      className="rounded-lg border border-emerald-700/70 bg-emerald-950/50 px-2 py-2.5 text-xs font-bold text-emerald-200 transition-colors hover:bg-emerald-900/60 disabled:cursor-not-allowed disabled:opacity-35"
+                    >
+                      🟢 ชนะแฮนด์นี้
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!canRecordActual}
+                      onClick={() => onRecordActual('lose')}
+                      className="rounded-lg border border-red-700/70 bg-red-950/50 px-2 py-2.5 text-xs font-bold text-red-200 transition-colors hover:bg-red-900/60 disabled:cursor-not-allowed disabled:opacity-35"
+                    >
+                      🔴 แพ้/หมอบแฮนด์นี้
+                    </button>
+                  </div>
+                  {actualFlash && (
+                    <p className="mt-2 text-center text-[11px] font-medium text-zinc-300">
+                      {actualFlash}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
