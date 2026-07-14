@@ -3,6 +3,11 @@ import dotenv from 'dotenv';
 import express, { type Request, type Response } from 'express';
 import path from 'path';
 import { analyzeGameState } from './services/localGtoEngine';
+import {
+  runMonteCarloSimulation,
+  SIM_DEFAULT_HANDS,
+  type SimulateApiResponse,
+} from './services/simulationEngine';
 import type { AnalyzeRequest, AnalyzeResponse, GameState } from './types';
 import { POSITIONS, STAGES } from './types';
 
@@ -77,6 +82,46 @@ app.post('/api/analyze', (req: Request, res: Response<AnalyzeResponse>) => {
     const message =
       error instanceof Error ? error.message : 'Unknown server error';
     console.error('[POST /api/analyze]', message);
+    res.status(500).json({ success: false, error: message });
+  }
+});
+
+/**
+ * Sandbox Monte Carlo — ไม่แตะ LocalStorage / ไม่เรียก GTO production logic จาก simulation path
+ * (localGtoEngine ถูก import สำหรับ /api/analyze เท่านั้น — simulationEngine แยกเด็ดขาด)
+ */
+app.post('/api/simulate', (req: Request, res: Response<SimulateApiResponse>) => {
+  try {
+    const body = (req.body ?? {}) as {
+      hands?: number;
+      winrateBb100?: number;
+      stdDevBb100?: number;
+      seed?: number;
+      chartPoints?: number;
+    };
+
+    const hands = body.hands ?? SIM_DEFAULT_HANDS;
+    if (hands < 1 || hands > 200_000) {
+      res.status(400).json({
+        success: false,
+        error: 'hands must be between 1 and 200000',
+      });
+      return;
+    }
+
+    const data = runMonteCarloSimulation({
+      hands,
+      winrateBb100: body.winrateBb100,
+      stdDevBb100: body.stdDevBb100,
+      seed: body.seed,
+      chartPoints: body.chartPoints,
+    });
+
+    res.json({ success: true, data });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'Unknown server error';
+    console.error('[POST /api/simulate]', message);
     res.status(500).json({ success: false, error: message });
   }
 });

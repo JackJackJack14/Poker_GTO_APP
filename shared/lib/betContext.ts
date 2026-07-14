@@ -1,5 +1,6 @@
 import type { Card, GameState, Position } from '../types/poker.types';
 import { POSITIONS } from '../types/poker.types';
+import { resolveWorkingPot } from './blinds';
 
 export interface BetContext {
   maxStreetBet: number;
@@ -59,7 +60,11 @@ export function computeBetContext(gameState: GameState): BetContext {
     };
   }
 
-  const pot = gameState.pot;
+  const pot = resolveWorkingPot({
+    pot: gameState.pot,
+    bigBlind: gameState.bigBlind,
+    positions: gameState.positions,
+  });
   const potOddsPercent = (toCall / (pot + toCall)) * 100;
   const potBeforeBet = Math.max(0, pot - facingBetSize);
   const mdfPercent =

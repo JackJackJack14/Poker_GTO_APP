@@ -47,3 +47,56 @@ export async function analyzeHand(gameState: GameState): Promise<AnalyzeResponse
     analyzeRequestLock = false;
   }
 }
+
+/** ผลจำลอง 50k แฮนด์ (sandbox) — ไม่แตะ LocalStorage */
+export interface MonteCarloSimResult {
+  handCount: number;
+  winrateBb100: number;
+  stdDevBb100: number;
+  evPerHand: number;
+  sdPerHand: number;
+  finalEv: number;
+  finalReal: number;
+  delta: number;
+  chart: {
+    hands: number[];
+    cumulativeEv: number[];
+    cumulativeReal: number[];
+  };
+  sandbox: true;
+}
+
+export async function runMonteCarloSim(params?: {
+  hands?: number;
+  seed?: number;
+}): Promise<MonteCarloSimResult> {
+  let res: Response;
+  try {
+    res = await fetch(apiUrl('/api/simulate'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        hands: params?.hands ?? 50_000,
+        seed: params?.seed,
+        chartPoints: 500,
+      }),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'fetch failed';
+    throw new Error(
+      `เชื่อมต่อ Simulation API ไม่ได้ (${message}) — ตรวจ Backend ที่ ${API_BASE}`,
+    );
+  }
+
+  const data = (await res.json()) as {
+    success: boolean;
+    data?: MonteCarloSimResult;
+    error?: string;
+  };
+
+  if (!res.ok || !data.success || !data.data) {
+    throw new Error(data.error ?? `Simulate failed (${res.status})`);
+  }
+
+  return data.data;
+}

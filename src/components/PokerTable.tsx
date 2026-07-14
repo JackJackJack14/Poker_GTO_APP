@@ -12,6 +12,7 @@ import {
   getPositionLabel,
   PHYSICAL_SEAT_LAYOUT,
   SEAT_COUNT,
+  STREET_BET_BADGE_LAYOUT,
   type SeatIndex,
 } from '../lib/seatLayout';
 
@@ -46,6 +47,32 @@ function btnClass(active: boolean): string {
       ? 'bg-gold/25 text-gold ring-1 ring-gold/50'
       : 'bg-zinc-700 text-zinc-300 hover:bg-zinc-600'
   }`;
+}
+
+/** ชิปเดิมพันลอยบน felt — แสดงเฉพาะเมื่อ bet > 0 และยังไม่ fold */
+function StreetBetBadge({
+  amount,
+  style,
+}: {
+  amount: number;
+  style: React.CSSProperties;
+}) {
+  return (
+    <div
+      className="pointer-events-none absolute z-[5]"
+      style={style}
+      aria-hidden
+    >
+      <div className="rounded-full border border-amber-400/70 bg-zinc-950/90 px-2.5 py-1 shadow-[0_2px_8px_rgba(0,0,0,0.45)] ring-1 ring-amber-700/40 backdrop-blur-[2px]">
+        <p className="whitespace-nowrap font-mono text-[11px] font-bold tabular-nums leading-none text-amber-200">
+          {amount.toFixed(1)}
+          <span className="ml-0.5 text-[9px] font-semibold text-amber-400/90">
+            BB
+          </span>
+        </p>
+      </div>
+    </div>
+  );
 }
 
 function Seat({
@@ -156,11 +183,6 @@ function Seat({
               {state.stack.toFixed(0)}
               <span className="text-[8px] text-zinc-500"> BB</span>
             </div>
-            {state.betSize > 0 && (
-              <div className="font-mono text-[9px] text-amber-300">
-                in {state.betSize.toFixed(1)}
-              </div>
-            )}
             {actionLabel && !state.folded && (
               <div className="truncate text-[8px] font-bold text-sky-300">
                 {actionLabel}
@@ -342,6 +364,20 @@ export function PokerTable({
           </div>
         )}
       </div>
+
+      {/* Street bet badges — ลอยบน felt เยื้องเข้ากลาง; หายเมื่อ bet=0 (เปลี่ยนสตรีท) */}
+      {Array.from({ length: SEAT_COUNT }, (_, index) => {
+        const seatIndex = index as SeatIndex;
+        const seat = seats[seatIndex];
+        if (seat.folded || seat.betSize <= 0) return null;
+        return (
+          <StreetBetBadge
+            key={`bet-badge-${seatIndex}`}
+            amount={seat.betSize}
+            style={STREET_BET_BADGE_LAYOUT[seatIndex]}
+          />
+        );
+      })}
 
       {/* 6 locked absolute seat pods */}
       {Array.from({ length: SEAT_COUNT }, (_, index) => {

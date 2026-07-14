@@ -64,6 +64,11 @@ export function GameControls({
             className="w-20 rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-center font-mono text-sm text-zinc-200"
           />
         </div>
+        {stage === 'PREFLOP' && streetPot >= 1.5 - 1e-9 && basePot < 1e-9 && (
+          <span className="rounded-lg border border-emerald-800/50 bg-emerald-950/40 px-2 py-1 text-[10px] font-medium text-emerald-300">
+            Blinds auto 1.5 BB
+          </span>
+        )}
       </div>
 
       <button

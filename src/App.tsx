@@ -77,28 +77,44 @@ export default function App() {
 
   const handleRecordActual = useCallback(
     (outcome: 'win' | 'lose') => {
+      // อ่านค่าโต๊ะก่อนล้าง UI — ใช้ตอนบันทึก win/lose
       const heroBet =
         game.positions[game.heroPosition]?.betSize ??
         pendingHand?.heroBetSize ??
         0;
+      const totalPot = game.pot;
+
+      // 1) Push ผลจริงลง LocalStorage + อัปเดตกราฟสะสม (ไม่ล้างประวัติ)
       const next = recordActualResult({
         handId: lastHandId ?? pendingHand?.id,
         outcome,
-        totalPot: game.pot,
+        totalPot,
         heroBetSize: heroBet,
       });
       setEvSession(next);
+      setLastHandId(null);
+
       const amount =
         outcome === 'win'
-          ? `+${game.pot.toFixed(1)} BB`
+          ? `+${totalPot.toFixed(1)} BB`
           : `-${Math.max(0, heroBet).toFixed(1)} BB`;
       setActualFlash(
         outcome === 'win'
           ? `🟢 บันทึกชนะ ${amount}`
           : `🔴 บันทึกแพ้ ${amount}`,
       );
+
+      // 2) One-Click Clean Slate — ล้างเฉพาะ input หน้าโต๊ะ เตรียมแฮนด์ถัดไป
+      game.clearHandInputs();
+      clearAnalysisUi();
+      setCardTarget({ type: 'hero', slot: 0 });
     },
-    [game.heroPosition, game.positions, game.pot, lastHandId, pendingHand],
+    [
+      clearAnalysisUi,
+      game,
+      lastHandId,
+      pendingHand,
+    ],
   );
 
   const registerBetInput = useCallback(
@@ -162,7 +178,12 @@ export default function App() {
       const response = await analyzeHand(gameState);
       const data = response.data ?? null;
       setResult(data);
-      if (data && typeof data.ev === 'number') {
+      // บันทึกกราฟสถิติเฉพาะ Postflop (FLOP/TURN/RIVER) — ไม่ปนกับ Preflop
+      if (
+        data &&
+        typeof data.ev === 'number' &&
+        context.stage !== 'PREFLOP'
+      ) {
         const heroBet =
           game.positions[game.heroPosition]?.betSize ?? 0;
         const next = appendEvHand({
@@ -177,6 +198,9 @@ export default function App() {
         setEvSession(next);
         const newest = next.hands[next.hands.length - 1];
         setLastHandId(newest?.id ?? null);
+        setActualFlash(null);
+      } else if (data) {
+        setLastHandId(null);
         setActualFlash(null);
       }
     } catch (err) {

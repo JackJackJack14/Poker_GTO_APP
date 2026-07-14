@@ -60,6 +60,64 @@ export function estimatePreflopEquity(handCode: string): number {
   return Math.min(85, Math.max(18, Math.round(eq)));
 }
 
+/**
+ * Equity vs tight 3-bet range ≈ QQ+/AK (~value) + light bluffs (Axs/SC)
+ * Mid SC เช่น T9s ควรอยู่ราว 35–40% (ไม่ใช่ ~53% แบบ vs random)
+ */
+export function estimatePreflopEquityVs3BetRange(handCode: string): number {
+  if (/^([2-9TJQKA])\1$/.test(handCode)) {
+    const r = cardRank(`${handCode[0]}s`);
+    if (r >= 14) return 85;
+    if (r === 13) return 82;
+    if (r === 12) return 68;
+    if (r === 11) return 54;
+    if (r === 10) return 47;
+    // 99→43 … 22→32
+    return Math.round(32 + ((r - 2) / 7) * 11);
+  }
+
+  const suited = handCode.endsWith('s');
+  const high = cardRank(`${handCode[0]}s`);
+  const low = cardRank(`${handCode[1]}s`);
+  const gap = high - low;
+  const prefix = handCode.slice(0, 2);
+
+  if (prefix === 'AK') return suited ? 43 : 41;
+  if (prefix === 'AQ') return suited ? 38 : 34;
+  if (prefix === 'AJ') return suited ? 36 : 32;
+  if (prefix === 'AT') return suited ? 35 : 31;
+  if (prefix === 'KQ') return suited ? 36 : 32;
+
+  // Speculative / mid suited — blend vs value (~30% eq) + light bluffs (~50%)
+  let eq = suited ? 34 : 30;
+  eq += (high - 10) * 1.2;
+  eq += (low - 8) * 0.6;
+  if (gap === 1) eq += 1.5;
+  if (gap >= 3) eq -= gap * 0.8;
+  if (high <= 9 && !suited) eq -= 3;
+  return Math.min(55, Math.max(28, Math.round(eq)));
+}
+
+/**
+ * Preflop equity ตาม prior action (แยกจาก postflop equity เด็ดขาด)
+ * - UNOPENED: vs random
+ * - FACING_OPEN: แคบกว่า random เล็กน้อย
+ * - FACING_3BET: vs QQ+/AK + Light Bluff
+ */
+export function estimatePreflopEquityByPrior(
+  handCode: string,
+  prior: 'UNOPENED' | 'FACING_OPEN' | 'FACING_3BET',
+): number {
+  if (prior === 'FACING_3BET') {
+    return estimatePreflopEquityVs3BetRange(handCode);
+  }
+  const vsRandom = estimatePreflopEquity(handCode);
+  if (prior === 'FACING_OPEN') {
+    return Math.min(85, Math.max(20, Math.round(vsRandom * 0.9 + 1)));
+  }
+  return vsRandom;
+}
+
 export type MadeCategory =
   | 'high-card'
   | 'one-pair'

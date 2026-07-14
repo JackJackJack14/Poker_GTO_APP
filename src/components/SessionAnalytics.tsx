@@ -1,6 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { EvSessionState } from '../lib/evTracker';
 import { totalSessionEv, totalSessionReal } from '../lib/evTracker';
+import {
+  runMonteCarloSim,
+  type MonteCarloSimResult,
+} from '../lib/api';
 
 interface SessionAnalyticsProps {
   session: EvSessionState;
@@ -10,12 +14,18 @@ interface SessionAnalyticsProps {
 function DualLineChart({
   cumulativeEv,
   cumulativeReal,
+  emptyHint,
+  ariaLabel,
+  height = 140,
 }: {
   cumulativeEv: number[];
   cumulativeReal: number[];
+  emptyHint: string;
+  ariaLabel: string;
+  height?: number;
 }) {
   const w = 360;
-  const h = 140;
+  const h = height;
   const pad = 14;
 
   const { evPath, realPath, zeroY, min, max } = useMemo(() => {
@@ -25,7 +35,6 @@ function DualLineChart({
     }
     const evVals = [0, ...cumulativeEv];
     const realVals = [0, ...cumulativeReal];
-    // align lengths
     while (evVals.length < realVals.length) evVals.push(evVals[evVals.length - 1] ?? 0);
     while (realVals.length < evVals.length) {
       realVals.push(realVals[realVals.length - 1] ?? 0);
@@ -54,14 +63,15 @@ function DualLineChart({
       min: minV,
       max: maxV,
     };
-  }, [cumulativeEv, cumulativeReal]);
+  }, [cumulativeEv, cumulativeReal, h]);
 
   if (cumulativeEv.length === 0) {
     return (
-      <div className="flex h-[140px] items-center justify-center rounded-lg border border-dashed border-zinc-700 bg-zinc-900/40">
-        <p className="text-xs text-zinc-500">
-          ยังไม่มีข้อมูล — กด「ความน่าจะเป็น」แล้วบันทึกผลชนะ/แพ้
-        </p>
+      <div
+        className="flex items-center justify-center rounded-lg border border-dashed border-zinc-700 bg-zinc-900/40"
+        style={{ height }}
+      >
+        <p className="px-3 text-center text-xs text-zinc-500">{emptyHint}</p>
       </div>
     );
   }
@@ -95,9 +105,10 @@ function DualLineChart({
       </div>
       <svg
         viewBox={`0 0 ${w} ${h}`}
-        className="h-[140px] w-full overflow-visible"
+        className="w-full overflow-visible"
+        style={{ height }}
         role="img"
-        aria-label="Cumulative EV and Real Money dual line graph"
+        aria-label={ariaLabel}
       >
         <line
           x1={pad}
@@ -111,7 +122,7 @@ function DualLineChart({
         <polyline
           fill="none"
           stroke="#38bdf8"
-          strokeWidth="2.25"
+          strokeWidth="2"
           strokeLinejoin="round"
           strokeLinecap="round"
           points={realPath}
@@ -119,7 +130,7 @@ function DualLineChart({
         <polyline
           fill="none"
           stroke="#34d399"
-          strokeWidth="2.5"
+          strokeWidth="2.25"
           strokeLinejoin="round"
           strokeLinecap="round"
           points={evPath}
@@ -134,6 +145,81 @@ function DualLineChart({
 function formatBb(n: number): string {
   const sign = n >= 0 ? '+' : '';
   return `${sign}${n.toFixed(2)} BB`;
+}
+
+function MonteCarloSandbox() {
+  const [sim, setSim] = useState<MonteCarloSimResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleRun = async () => {
+    if (loading) return;
+    setLoading(true);
+    setError(null);
+    try {
+      // ผลอยู่ใน memory (React state) เท่านั้น — ไม่เขียน LocalStorage
+      const data = await runMonteCarloSim({ hands: 50_000 });
+      setSim(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'จำลองไม่สำเร็จ');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="mt-5 rounded-xl border border-violet-900/50 bg-violet-950/20 p-3 sm:p-4">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-xs font-bold tracking-wide text-violet-200">
+            Sandbox · 50,000 Hands Monte Carlo
+          </h3>
+          <p className="mt-0.5 text-[10px] text-zinc-500">
+            True WR +5 bb/100 · SD 90 bb/100 · แยกจากเซสชันจริง (ไม่เขียน LocalStorage)
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={loading}
+          onClick={handleRun}
+          className="rounded-lg border border-violet-600/70 bg-violet-900/50 px-3 py-2 text-[11px] font-bold text-violet-100 transition-colors hover:bg-violet-800/60 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {loading ? 'กำลังจำลอง…' : '⚡ จำลองกราฟ 50,000 แฮนด์'}
+        </button>
+      </div>
+
+      {error && (
+        <p className="mb-2 text-[11px] text-red-300">{error}</p>
+      )}
+
+      {sim && (
+        <p className="mb-2 font-mono text-[11px] text-zinc-400">
+          <span className="text-emerald-400">
+            EV ท้าย: {formatBb(sim.finalEv)}
+          </span>
+          <span className="mx-2 text-zinc-600">|</span>
+          <span className="text-sky-400">
+            เงินจริงท้าย: {formatBb(sim.finalReal)}
+          </span>
+          <span className="mx-2 text-zinc-600">|</span>
+          <span className="text-amber-300">
+            Δ {formatBb(sim.delta)}
+          </span>
+          <span className="ml-2 text-zinc-600">
+            ({sim.handCount.toLocaleString()} แฮนด์ · chart {sim.chart.hands.length} จุด)
+          </span>
+        </p>
+      )}
+
+      <DualLineChart
+        cumulativeEv={sim?.chart.cumulativeEv ?? []}
+        cumulativeReal={sim?.chart.cumulativeReal ?? []}
+        emptyHint="กดปุ่มจำลองเพื่อสร้างกราฟ 50,000 แฮนด์ในหน่วยความจำ"
+        ariaLabel="Monte Carlo 50k hands EV vs Real Money simulation"
+        height={180}
+      />
+    </div>
+  );
 }
 
 export function SessionAnalytics({ session, onClear }: SessionAnalyticsProps) {
@@ -175,6 +261,8 @@ export function SessionAnalytics({ session, onClear }: SessionAnalyticsProps) {
       <DualLineChart
         cumulativeEv={session.cumulativeEv}
         cumulativeReal={session.cumulativeReal}
+        emptyHint="ยังไม่มีข้อมูล — กด「ความน่าจะเป็น」แล้วบันทึกผลชนะ/แพ้"
+        ariaLabel="Cumulative EV and Real Money dual line graph"
       />
 
       {session.hands.length > 0 && (
@@ -230,6 +318,9 @@ export function SessionAnalytics({ session, onClear }: SessionAnalyticsProps) {
           </table>
         </div>
       )}
+
+      {/* Sandbox แยกเด็ดขาด — ไม่ยุ่ง LocalStorage / GTO engine */}
+      <MonteCarloSandbox />
     </section>
   );
 }

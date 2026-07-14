@@ -221,12 +221,15 @@ export function GtoAdviceScreen({
                         : 'bg-red-950/50 text-red-300 ring-red-700/50'
                     }`}
                   >
-                    💰 EV สุทธิ: {result.ev >= 0 ? '+' : ''}
-                    {result.ev.toFixed(2)} BB
+                    <p>
+                      💰 EV สุทธิ:{' '}
+                      {result.ev > 0 ? '+' : ''}
+                      {result.ev.toFixed(2)} BB
+                    </p>
                     {result.priorAction && (
-                      <span className="mt-0.5 block text-[10px] font-medium text-zinc-400">
+                      <p className="mt-1 text-[10px] font-medium leading-snug text-zinc-400">
                         {result.priorAction}
-                      </span>
+                      </p>
                     )}
                   </div>
                   <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
