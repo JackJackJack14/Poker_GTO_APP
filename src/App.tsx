@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { GtoResponse, Stage } from './types';
 import { useGameState } from './hooks/useGameState';
 import { useGrindingHotkeys } from './hooks/useGrindingHotkeys';
@@ -11,7 +11,9 @@ import {
   getLatestPendingHand,
   loadEvSession,
   recordActualResult,
+  recordHandResolved,
   type EvSessionState,
+  type HandResolvedHandler,
 } from './lib/evTracker';
 import { PokerTable } from './components/PokerTable';
 import { CardSelector } from './components/CardSelector';
@@ -22,13 +24,18 @@ import {
   GtoAdviceScreen,
   type AnalysisContext,
 } from './components/GtoAdviceScreen';
+import {
+  ShowdownWinnerPanel,
+  type ShowdownResolution,
+} from './components/ShowdownWinnerPanel';
 import { getPositionLineup, type SeatIndex } from './lib/seatLayout';
 
 /** Minimum gap between analyze clicks (ms) — hard stop for double-fire / quota burn */
 const ANALYZE_DEBOUNCE_MS = 1000;
 
 export default function App() {
-  const game = useGameState();
+  const handResolvedRef = useRef<HandResolvedHandler | null>(null);
+  const game = useGameState(handResolvedRef);
   const [adviceOpen, setAdviceOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<GtoResponse | null>(null);
@@ -37,7 +44,6 @@ export default function App() {
     null,
   );
   const [cardTarget, setCardTarget] = useState<CardSelectTarget | null>(null);
-  const [activeSeatIndex, setActiveSeatIndex] = useState<SeatIndex>(0);
   const [evSession, setEvSession] = useState<EvSessionState>(() =>
     loadEvSession(),
   );
@@ -46,12 +52,36 @@ export default function App() {
   const betInputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const analyzeInFlightRef = useRef(false);
   const lastAnalyzeClickRef = useRef(0);
+  const lastHandIdRef = useRef<string | null>(null);
+  lastHandIdRef.current = lastHandId;
 
   const pendingHand = useMemo(
     () => getLatestPendingHand(evSession),
     [evSession],
   );
   const canRecordActual = Boolean(pendingHand);
+
+  // Auto-end hand (fold around) → บันทึกกำไรสุทธิ + กราฟฟ้าโดยไม่ต้องกด「ชนะ」
+  handResolvedRef.current = (payload) => {
+    const next = recordHandResolved(payload, lastHandIdRef.current);
+    setEvSession(next);
+    setLastHandId(null);
+    const sign = payload.netProfit >= 0 ? '+' : '';
+    setActualFlash(
+      payload.heroWon
+        ? `🟢 Auto-Win สุทธิ ${sign}${payload.netProfit.toFixed(2)} BB (Pot ${payload.totalPot.toFixed(1)} − ลงทุน ${payload.heroInvested.toFixed(1)})`
+        : payload.reason === 'hero-fold'
+          ? `🔴 Hero Fold −${payload.heroInvested.toFixed(2)} BB (ตัดสะสมตามยอดลงทุนทั้งแฮนด์)`
+          : `🔴 Auto-Lose สุทธิ ${sign}${payload.netProfit.toFixed(2)} BB (ลงทุน ${payload.heroInvested.toFixed(1)})`,
+    );
+    setAdviceOpen(false);
+    setResult(null);
+    setError(null);
+    setAnalysisContext(null);
+    setLoading(false);
+    analyzeInFlightRef.current = false;
+    setCardTarget({ type: 'hero', slot: 0 });
+  };
 
   const positionLineup = useMemo(
     () => getPositionLineup(game.btnSeatIndex),
@@ -75,46 +105,55 @@ export default function App() {
     setActualFlash(null);
   }, []);
 
-  const handleRecordActual = useCallback(
-    (outcome: 'win' | 'lose') => {
-      // อ่านค่าโต๊ะก่อนล้าง UI — ใช้ตอนบันทึก win/lose
-      const heroBet =
-        game.positions[game.heroPosition]?.betSize ??
-        pendingHand?.heroBetSize ??
-        0;
+  const handleShowdownResolve = useCallback(
+    (resolution: ShowdownResolution) => {
+      const heroInvested = game.heroInvested;
       const totalPot = game.pot;
+      const outcome = resolution.outcome;
+      const splitWays =
+        resolution.outcome === 'split' ? resolution.splitWays : undefined;
 
-      // 1) Push ผลจริงลง LocalStorage + อัปเดตกราฟสะสม (ไม่ล้างประวัติ)
       const next = recordActualResult({
         handId: lastHandId ?? pendingHand?.id,
         outcome,
         totalPot,
-        heroBetSize: heroBet,
+        heroInvested,
+        splitWays,
       });
       setEvSession(next);
       setLastHandId(null);
 
-      const amount =
-        outcome === 'win'
-          ? `+${totalPot.toFixed(1)} BB`
-          : `-${Math.max(0, heroBet).toFixed(1)} BB`;
-      setActualFlash(
-        outcome === 'win'
-          ? `🟢 บันทึกชนะ ${amount}`
-          : `🔴 บันทึกแพ้ ${amount}`,
-      );
+      const last = next.hands[next.hands.length - 1];
+      const net = last?.actualResult ?? 0;
+      const sign = net >= 0 ? '+' : '';
 
-      // 2) One-Click Clean Slate — ล้างเฉพาะ input หน้าโต๊ะ เตรียมแฮนด์ถัดไป
+      if (outcome === 'win') {
+        setActualFlash(
+          `🏆 ชนะเต็มสุทธิ ${sign}${net.toFixed(2)} BB (Pot ${totalPot.toFixed(1)} − ลงทุน ${heroInvested.toFixed(1)})`,
+        );
+      } else if (outcome === 'lose') {
+        setActualFlash(
+          `💀 แพ้ Showdown สุทธิ ${sign}${net.toFixed(2)} BB (ลงทุน ${heroInvested.toFixed(1)})`,
+        );
+      } else {
+        setActualFlash(
+          `🤝 Chop ${splitWays}-way สุทธิ ${sign}${net.toFixed(2)} BB ((Pot ${totalPot.toFixed(1)} / ${splitWays}) − ลงทุน ${heroInvested.toFixed(1)})`,
+        );
+      }
+
       game.clearHandInputs();
       clearAnalysisUi();
+      setAdviceOpen(false);
       setCardTarget({ type: 'hero', slot: 0 });
     },
-    [
-      clearAnalysisUi,
-      game,
-      lastHandId,
-      pendingHand,
-    ],
+    [clearAnalysisUi, game, lastHandId, pendingHand],
+  );
+
+  const handleRecordActual = useCallback(
+    (outcome: 'win' | 'lose') => {
+      handleShowdownResolve({ outcome });
+    },
+    [handleShowdownResolve],
   );
 
   const registerBetInput = useCallback(
@@ -125,14 +164,19 @@ export default function App() {
   );
 
   const focusBetInput = useCallback((seatIndex: SeatIndex) => {
-    setActiveSeatIndex(seatIndex);
     requestAnimationFrame(() => {
       betInputRefs.current[seatIndex]?.focus();
     });
   }, []);
 
+  // โฟกัสช่อง Bet ของคนที่ถึงคิวอัตโนมัติ (ยกเว้น Showdown)
+  useEffect(() => {
+    if (game.status === 'SHOWDOWN') return;
+    focusBetInput(game.actionSeatIndex);
+  }, [focusBetInput, game.actionSeatIndex, game.status]);
+
   useGrindingHotkeys({
-    enabled: !adviceOpen,
+    enabled: !adviceOpen && game.status !== 'SHOWDOWN',
     cardTarget,
     onCardTargetChange: setCardTarget,
     heroCards: game.heroCards,
@@ -141,7 +185,7 @@ export default function App() {
     usedCards: game.usedCards,
     onSelectHero: game.selectHeroCard,
     onSelectBoard: game.selectBoardCard,
-    activeSeatIndex,
+    activeSeatIndex: game.actionSeatIndex,
     seats: game.seats,
     positions: game.positions,
     onUpdateSeat: game.updateSeat,
@@ -223,7 +267,6 @@ export default function App() {
     game.resetTable();
     clearAnalysisUi();
     setCardTarget({ type: 'hero', slot: 0 });
-    setActiveSeatIndex(0);
   }, [clearAnalysisUi, game]);
 
   const analyzeDisabled = !!game.validationError || loading;
@@ -268,22 +311,28 @@ export default function App() {
           onStageChange={handleStageChange}
           onBasePotChange={game.setBasePot}
           onReset={handleReset}
+          canUndo={game.canUndo}
+          onUndo={game.handleUndo}
         />
 
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-5">
           <div className="lg:col-span-3">
             <div className="rounded-2xl border border-zinc-800/60 bg-zinc-900/30 p-4 sm:p-6">
               <ul className="mb-5 flex flex-wrap justify-center gap-x-4 gap-y-2 px-2 text-center text-[11px] leading-relaxed text-zinc-500 sm:gap-x-6">
-                <li className="list-none">คลิกเก้าอี้เพื่อย้าย BTN (D)</li>
-                <li className="list-none">กด「ตั้ง Hero」เลือกตำแหน่งของคุณ</li>
-                <li className="list-none">ป้ายหมุนตาม BTN→SB→BB→UTG→MP→CO</li>
-                <li className="list-none text-sky-400">เก้าอี้สีฟ้า = ปุ่มลัด f/c/r</li>
+                <li className="list-none">คลิก D เพื่อย้าย BTN</li>
+                <li className="list-none">กด「H」ตั้ง Hero</li>
+                <li className="list-none text-amber-400">
+                  กรอบทองกระพริบ = ถึงคิวแอคชั่น
+                </li>
+                <li className="list-none text-sky-400">ปุ่มลัด f/c/r ใช้กับที่ถึงคิว</li>
               </ul>
               <PokerTable
                 seats={game.seats}
                 btnSeatIndex={game.btnSeatIndex}
                 heroSeatIndex={game.heroSeatIndex}
-                activeSeatIndex={activeSeatIndex}
+                actionSeatIndex={game.actionSeatIndex}
+                handStatus={game.status}
+                stage={game.stage}
                 heroCards={game.heroCards}
                 boardCards={game.boardCards}
                 pot={game.pot}
@@ -291,7 +340,6 @@ export default function App() {
                 positions={game.positions}
                 onSetBtnSeat={game.setBtnSeat}
                 onSetHeroSeat={game.setHeroSeat}
-                onActiveSeatChange={setActiveSeatIndex}
                 onUpdateSeat={game.updateSeat}
                 registerBetInput={registerBetInput}
               />
@@ -340,44 +388,57 @@ export default function App() {
                   </button>
                 </div>
 
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    disabled={!canRecordActual}
-                    onClick={() => handleRecordActual('win')}
-                    title={
-                      canRecordActual
-                        ? `ชนะ → บันทึก +${game.pot.toFixed(1)} BB (Total Pot)`
-                        : 'วิเคราะห์แฮนด์ก่อน แล้วค่อยบันทึกผลจริง'
-                    }
-                    className="rounded-xl border border-emerald-700/70 bg-emerald-950/50 px-2 py-2.5 text-xs font-bold text-emerald-200 transition-colors hover:bg-emerald-900/60 disabled:cursor-not-allowed disabled:opacity-35"
-                  >
-                    🟢 ชนะแฮนด์นี้
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!canRecordActual}
-                    onClick={() => handleRecordActual('lose')}
-                    title={
-                      canRecordActual
-                        ? `แพ้ → บันทึก −${(game.positions[game.heroPosition]?.betSize ?? pendingHand?.heroBetSize ?? 0).toFixed(1)} BB`
-                        : 'วิเคราะห์แฮนด์ก่อน แล้วค่อยบันทึกผลจริง'
-                    }
-                    className="rounded-xl border border-red-700/70 bg-red-950/50 px-2 py-2.5 text-xs font-bold text-red-200 transition-colors hover:bg-red-900/60 disabled:cursor-not-allowed disabled:opacity-35"
-                  >
-                    🔴 แพ้/หมอบแฮนด์นี้
-                  </button>
-                </div>
+                {game.status === 'SHOWDOWN' ? (
+                  <div className="mt-2 rounded-xl border border-amber-700/50 bg-amber-950/20 p-2.5">
+                    <ShowdownWinnerPanel
+                      totalPot={game.pot}
+                      heroInvested={game.heroInvested}
+                      activePlayerCount={game.activePlayerCount}
+                      onResolve={handleShowdownResolve}
+                    />
+                  </div>
+                ) : (
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      disabled={!canRecordActual}
+                      onClick={() => handleRecordActual('win')}
+                      title={
+                        canRecordActual
+                          ? `ชนะสุทธิ → Pot ${game.pot.toFixed(1)} − ลงทุน ${game.heroInvested.toFixed(1)} = ${(game.pot - game.heroInvested).toFixed(2)} BB`
+                          : 'วิเคราะห์แฮนด์ก่อน แล้วค่อยบันทึกผลจริง'
+                      }
+                      className="rounded-xl border border-emerald-700/70 bg-emerald-950/50 px-2 py-2.5 text-xs font-bold text-emerald-200 transition-colors hover:bg-emerald-900/60 disabled:cursor-not-allowed disabled:opacity-35"
+                    >
+                      🟢 ชนะแฮนด์นี้
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!canRecordActual}
+                      onClick={() => handleRecordActual('lose')}
+                      title={
+                        canRecordActual
+                          ? `แพ้สุทธิ → −${game.heroInvested.toFixed(1)} BB (ชิปที่ลงทั้งแฮนด์)`
+                          : 'วิเคราะห์แฮนด์ก่อน แล้วค่อยบันทึกผลจริง'
+                      }
+                      className="rounded-xl border border-red-700/70 bg-red-950/50 px-2 py-2.5 text-xs font-bold text-red-200 transition-colors hover:bg-red-900/60 disabled:cursor-not-allowed disabled:opacity-35"
+                    >
+                      🔴 แพ้/หมอบแฮนด์นี้
+                    </button>
+                  </div>
+                )}
                 {actualFlash && (
                   <p className="mt-2 text-center text-[11px] font-medium text-zinc-300">
                     {actualFlash}
                   </p>
                 )}
-                {!canRecordActual && evSession.hands.length > 0 && (
-                  <p className="mt-1.5 text-center text-[10px] text-zinc-600">
-                    แฮนด์ล่าสุดบันทึกผลจริงแล้ว — วิเคราะห์มือใหม่เพื่อบันทึกต่อ
-                  </p>
-                )}
+                {game.status !== 'SHOWDOWN' &&
+                  !canRecordActual &&
+                  evSession.hands.length > 0 && (
+                    <p className="mt-1.5 text-center text-[10px] text-zinc-600">
+                      แฮนด์ล่าสุดบันทึกผลจริงแล้ว — วิเคราะห์มือใหม่เพื่อบันทึกต่อ
+                    </p>
+                  )}
               </div>
             </div>
           </div>
@@ -394,9 +455,15 @@ export default function App() {
         loading={loading}
         error={error}
         context={analysisContext}
+        heroInvested={game.heroInvested}
+        totalInvestedAcrossHand={game.totalInvestedAcrossHand}
+        handStatus={game.status}
+        totalPot={game.pot}
+        activePlayerCount={game.activePlayerCount}
         canRecordActual={canRecordActual}
         actualFlash={actualFlash}
         onRecordActual={handleRecordActual}
+        onShowdownResolve={handleShowdownResolve}
         onClose={() => setAdviceOpen(false)}
       />
     </div>

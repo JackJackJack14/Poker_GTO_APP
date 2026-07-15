@@ -1,4 +1,10 @@
-import type { GtoResponse, Position, Stage } from '../types';
+import { useMemo } from 'react';
+import type { GtoResponse, HandStatus, Position, Stage } from '../types';
+import { applyEffectiveStackCapToAdvice } from '../lib/stackCapAdvice';
+import {
+  ShowdownWinnerPanel,
+  type ShowdownResolution,
+} from './ShowdownWinnerPanel';
 
 export interface AnalysisContext {
   heroPosition: Position;
@@ -16,9 +22,17 @@ interface GtoAdviceScreenProps {
   context: AnalysisContext | null;
   onClose: () => void;
   open: boolean;
+  /** ชิปที่ Hero ลงทุนสะสมทั้งแฮนด์ — เพดาน All-in = 100 − ค่านี้ */
+  heroInvested?: number;
+  /** alias ชัดเจนสำหรับ totalInvestedAcrossHand */
+  totalInvestedAcrossHand?: number;
+  handStatus?: HandStatus;
+  totalPot?: number;
+  activePlayerCount?: number;
   canRecordActual?: boolean;
   actualFlash?: string | null;
   onRecordActual?: (outcome: 'win' | 'lose') => void;
+  onShowdownResolve?: (resolution: ShowdownResolution) => void;
 }
 
 function EquityRing({ equity }: { equity: number }) {
@@ -128,10 +142,22 @@ export function GtoAdviceScreen({
   context,
   onClose,
   open,
+  heroInvested = 0,
+  totalInvestedAcrossHand,
+  handStatus = 'PLAYING',
+  totalPot = 0,
+  activePlayerCount = 2,
   canRecordActual = false,
   actualFlash = null,
   onRecordActual,
+  onShowdownResolve,
 }: GtoAdviceScreenProps) {
+  const investedForCap = totalInvestedAcrossHand ?? heroInvested;
+  const displayText = useMemo(() => {
+    if (!result?.text) return '';
+    return applyEffectiveStackCapToAdvice(result.text, investedForCap);
+  }, [result?.text, investedForCap]);
+
   if (!open) return null;
 
   return (
@@ -234,41 +260,58 @@ export function GtoAdviceScreen({
                   </div>
                   <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
                     <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-zinc-200">
-                      {result.text}
+                      {displayText}
                     </pre>
                   </div>
                 </div>
               </div>
 
-              {onRecordActual && (
-                <div className="rounded-xl border border-zinc-700/60 bg-zinc-950/60 p-3">
-                  <p className="mb-2 text-center text-[11px] text-zinc-400">
-                    บันทึกผลจริงท้ายแฮนด์ → อัปเดตเส้นเงินจริงบนกราฟ
-                  </p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      disabled={!canRecordActual}
-                      onClick={() => onRecordActual('win')}
-                      className="rounded-lg border border-emerald-700/70 bg-emerald-950/50 px-2 py-2.5 text-xs font-bold text-emerald-200 transition-colors hover:bg-emerald-900/60 disabled:cursor-not-allowed disabled:opacity-35"
-                    >
-                      🟢 ชนะแฮนด์นี้
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!canRecordActual}
-                      onClick={() => onRecordActual('lose')}
-                      className="rounded-lg border border-red-700/70 bg-red-950/50 px-2 py-2.5 text-xs font-bold text-red-200 transition-colors hover:bg-red-900/60 disabled:cursor-not-allowed disabled:opacity-35"
-                    >
-                      🔴 แพ้/หมอบแฮนด์นี้
-                    </button>
-                  </div>
+              {handStatus === 'SHOWDOWN' && onShowdownResolve ? (
+                <div className="rounded-xl border border-amber-700/50 bg-amber-950/20 p-3">
+                  <ShowdownWinnerPanel
+                    compact
+                    totalPot={totalPot || context?.pot || 0}
+                    heroInvested={heroInvested}
+                    activePlayerCount={activePlayerCount}
+                    onResolve={onShowdownResolve}
+                  />
                   {actualFlash && (
                     <p className="mt-2 text-center text-[11px] font-medium text-zinc-300">
                       {actualFlash}
                     </p>
                   )}
                 </div>
+              ) : (
+                onRecordActual && (
+                  <div className="rounded-xl border border-zinc-700/60 bg-zinc-950/60 p-3">
+                    <p className="mb-2 text-center text-[11px] text-zinc-400">
+                      บันทึกผลจริงท้ายแฮนด์ → อัปเดตเส้นเงินจริงบนกราฟ
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        disabled={!canRecordActual}
+                        onClick={() => onRecordActual('win')}
+                        className="rounded-lg border border-emerald-700/70 bg-emerald-950/50 px-2 py-2.5 text-xs font-bold text-emerald-200 transition-colors hover:bg-emerald-900/60 disabled:cursor-not-allowed disabled:opacity-35"
+                      >
+                        🟢 ชนะแฮนด์นี้
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!canRecordActual}
+                        onClick={() => onRecordActual('lose')}
+                        className="rounded-lg border border-red-700/70 bg-red-950/50 px-2 py-2.5 text-xs font-bold text-red-200 transition-colors hover:bg-red-900/60 disabled:cursor-not-allowed disabled:opacity-35"
+                      >
+                        🔴 แพ้/หมอบแฮนด์นี้
+                      </button>
+                    </div>
+                    {actualFlash && (
+                      <p className="mt-2 text-center text-[11px] font-medium text-zinc-300">
+                        {actualFlash}
+                      </p>
+                    )}
+                  </div>
+                )
               )}
             </div>
           )}

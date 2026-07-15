@@ -10,6 +10,8 @@ interface GameControlsProps {
   onStageChange: (stage: Stage) => void;
   onBasePotChange: (basePot: number) => void;
   onReset: () => void;
+  canUndo?: boolean;
+  onUndo?: () => void;
 }
 
 export function GameControls({
@@ -20,6 +22,8 @@ export function GameControls({
   onStageChange,
   onBasePotChange,
   onReset,
+  canUndo = false,
+  onUndo,
 }: GameControlsProps) {
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/40 px-4 py-3">
@@ -71,17 +75,35 @@ export function GameControls({
         )}
       </div>
 
-      <button
-        type="button"
-        onClick={onReset}
-        title="ล้างไพ่ / พ็อต / Actions ทั้งหมด — เริ่มแฮนด์ใหม่ทันที"
-        className="ml-auto flex items-center gap-1.5 rounded-lg border border-red-800/70 bg-red-950/50 px-3.5 py-2 text-xs font-bold tracking-wide text-red-200 shadow-sm transition-colors hover:border-red-500 hover:bg-red-900/60 hover:text-white"
-      >
-        <span className="text-sm leading-none" aria-hidden>
-          ⟲
-        </span>
-        ล้างข้อมูลแฮนด์ (Reset Table)
-      </button>
+      <div className="ml-auto flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={!canUndo || !onUndo}
+          onClick={onUndo}
+          title={
+            canUndo
+              ? 'ย้อนกลับ 1 แอคชั่นก่อนหน้า'
+              : 'ยังไม่มีประวัติให้ย้อนกลับ'
+          }
+          className="flex items-center gap-1.5 rounded-lg border border-zinc-600 bg-zinc-800/80 px-3.5 py-2 text-xs font-bold tracking-wide text-zinc-200 shadow-sm transition-colors hover:border-sky-600/60 hover:bg-zinc-700 hover:text-sky-200 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:border-zinc-600 disabled:hover:bg-zinc-800/80 disabled:hover:text-zinc-200"
+        >
+          <span className="text-sm leading-none" aria-hidden>
+            ↩️
+          </span>
+          Undo
+        </button>
+        <button
+          type="button"
+          onClick={onReset}
+          title="ล้างไพ่ / พ็อต / Actions ทั้งหมด — เริ่มแฮนด์ใหม่ทันที"
+          className="flex items-center gap-1.5 rounded-lg border border-red-800/70 bg-red-950/50 px-3.5 py-2 text-xs font-bold tracking-wide text-red-200 shadow-sm transition-colors hover:border-red-500 hover:bg-red-900/60 hover:text-white"
+        >
+          <span className="text-sm leading-none" aria-hidden>
+            ⟲
+          </span>
+          ล้างข้อมูลแฮนด์ (Reset Table)
+        </button>
+      </div>
     </div>
   );
 }

@@ -1,7 +1,7 @@
-import type { Position, PositionState } from '../types';
+import { useEffect, useState } from 'react';
+import type { Card, HandStatus, Position, PositionState, Stage } from '../types';
 import { PlayingCard } from './PlayingCard';
 import { NumericInput } from './NumericInput';
-import type { Card } from '../types';
 import {
   getMaxStreetBet,
   getSeatActionLabel,
@@ -16,20 +16,23 @@ import {
   type SeatIndex,
 } from '../lib/seatLayout';
 
+/** Neon green สำหรับ HERO — แยกจาก Active Turn สีทอง */
+const HERO_NEON = '#39FF14';
+
 interface SeatProps {
   seatIndex: SeatIndex;
   position: Position;
   state: PositionState;
   isHero: boolean;
   isButton: boolean;
-  isActive: boolean;
+  isToAct: boolean;
   heroCards?: [Card | null, Card | null];
   maxStreetBet: number;
   streetMode: StreetMode;
   pot: number;
+  stage: Stage;
   onSetButton: () => void;
   onSetHero: () => void;
-  onActivate: () => void;
   onUpdate: (patch: Partial<PositionState>) => void;
   betInputRef: (el: HTMLInputElement | null) => void;
   style: React.CSSProperties;
@@ -41,15 +44,16 @@ function roundBb(n: number): number {
   return Math.round(Math.max(0, n) * 10) / 10;
 }
 
-function btnClass(active: boolean): string {
+function btnClass(active: boolean, disabled: boolean): string {
   return `rounded px-1.5 py-0.5 text-[9px] font-semibold leading-none transition-colors ${
-    active
-      ? 'bg-gold/25 text-gold ring-1 ring-gold/50'
-      : 'bg-zinc-700 text-zinc-300 hover:bg-zinc-600'
+    disabled
+      ? 'cursor-not-allowed bg-zinc-800/50 text-zinc-600 opacity-40'
+      : active
+        ? 'bg-gold/25 text-gold ring-1 ring-gold/50'
+        : 'bg-zinc-700 text-zinc-300 hover:bg-zinc-600'
   }`;
 }
 
-/** ชิปเดิมพันลอยบน felt — แสดงเฉพาะเมื่อ bet > 0 และยังไม่ fold */
 function StreetBetBadge({
   amount,
   style,
@@ -59,11 +63,11 @@ function StreetBetBadge({
 }) {
   return (
     <div
-      className="pointer-events-none absolute z-[5]"
+      className="pointer-events-none absolute z-30 overflow-visible"
       style={style}
       aria-hidden
     >
-      <div className="rounded-full border border-amber-400/70 bg-zinc-950/90 px-2.5 py-1 shadow-[0_2px_8px_rgba(0,0,0,0.45)] ring-1 ring-amber-700/40 backdrop-blur-[2px]">
+      <div className="rounded-full border border-amber-400/80 bg-zinc-950/95 px-2.5 py-1 shadow-[0_4px_14px_rgba(0,0,0,0.55)] ring-1 ring-amber-500/50 backdrop-blur-[2px]">
         <p className="whitespace-nowrap font-mono text-[11px] font-bold tabular-nums leading-none text-amber-200">
           {amount.toFixed(1)}
           <span className="ml-0.5 text-[9px] font-semibold text-amber-400/90">
@@ -81,43 +85,75 @@ function Seat({
   state,
   isHero,
   isButton,
-  isActive,
+  isToAct,
   heroCards,
   maxStreetBet,
   streetMode,
   pot,
+  stage,
   onSetButton,
   onSetHero,
-  onActivate,
   onUpdate,
   betInputRef,
   style,
 }: SeatProps) {
   const actionLabel = getSeatActionLabel(state, maxStreetBet);
-  const isChecked =
-    !state.folded &&
-    ((streetMode === 'open' && state.betSize === 0) ||
-      (streetMode === 'matched' && state.betSize === maxStreetBet));
+  const actionsLocked = !isToAct;
+  const canCheck = !state.folded && streetMode !== 'facing';
+  const canCall = !state.folded && streetMode === 'facing';
+  const raiseLabel = streetMode === 'facing' || streetMode === 'matched' ? 'Raise' : 'Bet';
 
-  const zIndex = isActive ? 40 : isHero ? 30 : 10 + seatIndex;
+  /** ช่องเดิมพันเริ่มว่างเสมอ (0 + placeholder) — ไม่ดึง min/ของเก่า */
+  const [raiseDraft, setRaiseDraft] = useState(0);
+
+  useEffect(() => {
+    setRaiseDraft(0);
+  }, [isToAct, streetMode, seatIndex, stage]);
+
+  const zIndex = isToAct ? 45 : isHero ? 30 : 10 + seatIndex;
+
+  const commitRaise = (rawAmount?: number) => {
+    if (actionsLocked || state.folded) return;
+    let amount = roundBb(rawAmount ?? raiseDraft);
+    if (streetMode === 'facing' || streetMode === 'matched') {
+      const minRaise = roundBb(Math.max(maxStreetBet * 2, maxStreetBet + 1));
+      if (amount <= maxStreetBet + 1e-9) amount = minRaise;
+    } else if (amount <= 0) {
+      amount = roundBb(Math.max(1, pot * 0.33));
+    }
+    setRaiseDraft(0);
+    onUpdate({ betSize: amount });
+  };
+
+  const heroFrameStyle =
+    isHero && !isToAct
+      ? {
+          borderColor: HERO_NEON,
+          boxShadow: `0 0 14px ${HERO_NEON}99, 0 0 28px ${HERO_NEON}55`,
+        }
+      : isHero && isToAct
+        ? {
+            borderColor: HERO_NEON,
+            boxShadow: `0 0 12px ${HERO_NEON}88, 0 0 20px rgba(251,191,36,0.65)`,
+          }
+        : undefined;
 
   return (
+    // ไม่มี onClick บน container — คิวเปลี่ยนได้เฉพาะปุ่มแอคชั่น / hotkeys
     <div
-      className="absolute"
-      style={{ ...style, zIndex, width: '7.25rem' }}
-      onClick={onActivate}
-      onFocus={onActivate}
+      className="absolute overflow-visible"
+      style={{ ...style, zIndex, width: '7.5rem' }}
     >
       <div
-        className={`flex max-h-[9.5rem] w-full flex-col overflow-hidden rounded-lg border bg-zinc-950/95 px-1.5 py-1 shadow-md backdrop-blur-sm ${
-          isHero
-            ? 'border-gold ring-1 ring-gold/60'
-            : isActive
-              ? 'border-sky-400 ring-1 ring-sky-400/50'
+        style={heroFrameStyle}
+        className={`flex max-h-[10.5rem] w-full flex-col overflow-visible rounded-lg border bg-zinc-950/95 px-1.5 py-1 shadow-md backdrop-blur-sm transition-[box-shadow,border-color] ${
+          isToAct
+            ? 'animate-pulse border-amber-400 ring-2 ring-amber-400/85 shadow-[0_0_22px_rgba(251,191,36,0.75)]'
+            : isHero
+              ? 'ring-1'
               : 'border-zinc-700/80'
         } ${state.folded ? 'opacity-45' : ''}`}
       >
-        {/* Row 1: position + dealer + hero toggle */}
         <div className="flex items-center gap-0.5">
           <button
             type="button"
@@ -136,13 +172,23 @@ function Seat({
           </button>
           <div
             className={`min-w-0 flex-1 truncate rounded px-1 py-0.5 text-center text-[10px] font-bold tracking-wide ${
-              isHero
-                ? 'bg-gold text-zinc-900'
-                : 'bg-zinc-800 text-zinc-200'
+              isToAct
+                ? 'bg-amber-400 text-zinc-950'
+                : isHero
+                  ? 'text-zinc-950'
+                  : 'bg-zinc-800 text-zinc-200'
             }`}
+            style={
+              isHero && !isToAct
+                ? {
+                    backgroundColor: HERO_NEON,
+                    boxShadow: `0 0 8px ${HERO_NEON}`,
+                  }
+                : undefined
+            }
           >
             {position}
-            {isHero ? ' ★' : ''}
+            {isToAct ? ' ●' : isHero ? ' ★' : ''}
           </div>
           <button
             type="button"
@@ -150,17 +196,20 @@ function Seat({
               e.stopPropagation();
               onSetHero();
             }}
-            className={`shrink-0 rounded px-1 py-0.5 text-[8px] ${
-              isHero
-                ? 'text-emerald-300'
-                : 'text-zinc-500 hover:text-zinc-300'
+            title="ตั้งเป็น Hero"
+            className={`shrink-0 rounded px-1 py-0.5 text-[8px] font-bold ${
+              isHero ? 'text-[#39FF14]' : 'text-zinc-500 hover:text-zinc-300'
             }`}
+            style={
+              isHero
+                ? { textShadow: `0 0 6px ${HERO_NEON}` }
+                : undefined
+            }
           >
             H
           </button>
         </div>
 
-        {/* Row 2: cards (hero only) + stack/bet */}
         <div className="mt-0.5 flex items-center gap-1">
           {isHero && heroCards ? (
             <div className="flex shrink-0 gap-0.5">
@@ -180,7 +229,10 @@ function Seat({
           ) : null}
           <div className="min-w-0 flex-1 text-right leading-tight">
             <div className="font-mono text-[10px] text-emerald-400">
-              {state.stack.toFixed(0)}
+              {Math.max(
+                0,
+                state.stack ?? 100 - (state.investedHand ?? 0),
+              ).toFixed(0)}
               <span className="text-[8px] text-zinc-500"> BB</span>
             </div>
             {actionLabel && !state.folded && (
@@ -194,72 +246,100 @@ function Seat({
           </div>
         </div>
 
-        {/* Row 3: Fold / Call|Check — horizontal */}
+        {/* ปุ่มหลัก 3 ตัว: Fold | Check/Call | (Raise อยู่แถวช่องยอด) */}
         <div
-          className="mt-0.5 flex flex-wrap items-center gap-0.5"
+          className={`mt-0.5 flex flex-wrap items-center gap-0.5 ${
+            actionsLocked ? 'pointer-events-none' : ''
+          }`}
           onClick={(e) => e.stopPropagation()}
         >
           <button
             type="button"
-            onClick={() => onUpdate({ folded: !state.folded })}
-            className={btnClass(state.folded)}
+            disabled={actionsLocked || state.folded}
+            onClick={() => {
+              if (state.folded || actionsLocked) return;
+              onUpdate({ folded: true });
+            }}
+            className={btnClass(false, actionsLocked || state.folded)}
           >
-            {state.folded ? 'Un' : 'Fold'}
+            Fold
           </button>
-          {!state.folded && streetMode !== 'facing' && (
+          {canCheck && (
             <button
               type="button"
-              onClick={() =>
-                onUpdate({ betSize: streetMode === 'open' ? 0 : state.betSize })
-              }
-              className={btnClass(isChecked)}
+              disabled={actionsLocked}
+              onClick={() => {
+                if (actionsLocked) return;
+                onUpdate({
+                  betSize: streetMode === 'open' ? 0 : state.betSize,
+                });
+              }}
+              className={btnClass(false, actionsLocked)}
             >
-              Chk
+              Check
             </button>
           )}
-          {!state.folded && streetMode === 'facing' && (
+          {canCall && (
             <button
               type="button"
-              onClick={() => onUpdate({ betSize: maxStreetBet })}
-              className={btnClass(state.betSize === maxStreetBet)}
-              title={`Call ${maxStreetBet.toFixed(1)}`}
+              disabled={actionsLocked}
+              onClick={() => {
+                if (actionsLocked) return;
+                onUpdate({ betSize: maxStreetBet });
+              }}
+              className={btnClass(false, actionsLocked)}
+              title={`Call ${maxStreetBet.toFixed(1)} BB`}
             >
               Call
             </button>
           )}
         </div>
 
-        {/* Row 4: Bet/Raise input + % — horizontal compact */}
+        {/* ช่องยอด + ปุ่ม Raise/Bet — พิมพ์อย่างเดียวไม่เปลี่ยนคิว จนกว่าจะกด Raise / Enter */}
         {!state.folded && (
           <div
-            className="mt-0.5 flex items-center gap-0.5"
+            className={`mt-0.5 flex flex-col gap-0.5 ${
+              actionsLocked ? 'pointer-events-none opacity-40' : ''
+            }`}
             onClick={(e) => e.stopPropagation()}
           >
-            <NumericInput
-              ref={betInputRef}
-              value={state.betSize}
-              onChange={(amount) => {
-                if (state.folded) return;
-                onUpdate({ betSize: Math.max(0, amount) });
-              }}
-              className="min-w-0 flex-1 rounded border border-zinc-600 bg-zinc-800 px-0.5 py-0.5 text-center font-mono text-[9px] text-zinc-200"
-            />
-            {QUICK_BET_PERCENTS.map((pct) => (
+            <div className="flex items-center gap-0.5">
+              <NumericInput
+                ref={isToAct ? betInputRef : undefined}
+                value={raiseDraft}
+                onChange={setRaiseDraft}
+                onEnterCommit={(amount) => commitRaise(amount)}
+                disabled={actionsLocked}
+                emptyWhenZero
+                placeholder="0"
+                className="min-w-0 flex-1 rounded border border-amber-700/50 bg-zinc-800 px-0.5 py-0.5 text-center font-mono text-[9px] text-amber-100 disabled:cursor-not-allowed placeholder:text-zinc-500"
+              />
               <button
-                key={pct}
                 type="button"
-                onClick={() =>
-                  onUpdate({ betSize: roundBb((pot * pct) / 100) })
-                }
-                className="shrink-0 rounded bg-zinc-800 px-1 py-0.5 text-[8px] font-semibold text-amber-300/90 ring-1 ring-zinc-700 hover:bg-amber-900/40"
+                disabled={actionsLocked}
+                onClick={() => commitRaise()}
+                className="shrink-0 rounded bg-amber-500/90 px-1.5 py-0.5 text-[9px] font-bold text-zinc-950 ring-1 ring-amber-300/80 hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {pct}
+                {raiseLabel}
               </button>
-            ))}
+            </div>
+            <div className="flex flex-wrap justify-center gap-0.5">
+              {QUICK_BET_PERCENTS.map((pct) => (
+                <button
+                  key={pct}
+                  type="button"
+                  disabled={actionsLocked}
+                  onClick={() => setRaiseDraft(roundBb((pot * pct) / 100))}
+                  title={`เติม ${pct}% pot ลงช่อง — ยังไม่ยืนยันจนกด ${raiseLabel}`}
+                  className="rounded bg-zinc-800 px-1 py-0.5 text-[8px] font-semibold text-amber-300/90 ring-1 ring-zinc-700 hover:bg-amber-900/40 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {pct}%
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
-        {/* Row 5: stack + tendencies — single compact line */}
         <div
           className="mt-0.5 flex items-center gap-0.5"
           onClick={(e) => e.stopPropagation()}
@@ -267,6 +347,7 @@ function Seat({
           <NumericInput
             value={state.stack}
             onChange={(stack) => onUpdate({ stack })}
+            emptyWhenZero={false}
             className="min-w-0 flex-1 rounded border border-zinc-700 bg-zinc-900 px-0.5 py-0.5 text-center font-mono text-[8px] text-zinc-400"
           />
           {!isHero && (
@@ -301,7 +382,10 @@ interface PokerTableProps {
   seats: PositionState[];
   btnSeatIndex: SeatIndex;
   heroSeatIndex: SeatIndex;
-  activeSeatIndex: SeatIndex;
+  actionSeatIndex: SeatIndex;
+  /** เมื่อ SHOWDOWN — ล็อกแอคชั่นทุกเก้าอี้ */
+  handStatus?: HandStatus;
+  stage: Stage;
   heroCards: [Card | null, Card | null];
   boardCards: (Card | null)[];
   pot: number;
@@ -309,7 +393,6 @@ interface PokerTableProps {
   positions: Record<Position, PositionState>;
   onSetBtnSeat: (seatIndex: SeatIndex) => void;
   onSetHeroSeat: (seatIndex: SeatIndex) => void;
-  onActiveSeatChange: (seatIndex: SeatIndex) => void;
   onUpdateSeat: (seatIndex: SeatIndex, patch: Partial<PositionState>) => void;
   registerBetInput: (seatIndex: SeatIndex, el: HTMLInputElement | null) => void;
 }
@@ -318,7 +401,9 @@ export function PokerTable({
   seats,
   btnSeatIndex,
   heroSeatIndex,
-  activeSeatIndex,
+  actionSeatIndex,
+  handStatus = 'PLAYING',
+  stage,
   heroCards,
   boardCards,
   pot,
@@ -326,22 +411,19 @@ export function PokerTable({
   positions,
   onSetBtnSeat,
   onSetHeroSeat,
-  onActiveSeatChange,
   onUpdateSeat,
   registerBetInput,
 }: PokerTableProps) {
   const visibleBoard = boardCards.filter((c): c is Card => c !== null);
   const maxStreetBet = getMaxStreetBet(positions);
   const streetPot = pot - basePot;
+  const actingEnabled = handStatus === 'PLAYING';
 
   return (
-    /* Wrapper: position relative — fixed 6-max frame */
-    <div className="relative mx-auto aspect-[5/4] w-full max-w-3xl">
-      {/* Felt oval — center only, seats stay outside ring */}
-      <div className="pointer-events-none absolute inset-[18%_14%] rounded-[50%] bg-gradient-to-br from-felt-mid via-felt-dark to-felt-light shadow-[inset_0_0_50px_rgba(0,0,0,0.55),0_0_30px_rgba(0,0,0,0.45)] ring-[3px] ring-amber-900/45">
+    <div className="relative mx-auto aspect-[5/4] w-full max-w-3xl overflow-visible">
+      <div className="pointer-events-none absolute inset-[18%_14%] overflow-visible rounded-[50%] bg-gradient-to-br from-felt-mid via-felt-dark to-felt-light shadow-[inset_0_0_50px_rgba(0,0,0,0.55),0_0_30px_rgba(0,0,0,0.45)] ring-[3px] ring-amber-900/45">
         <div className="absolute inset-2 rounded-[50%] border border-amber-800/25" />
 
-        {/* Pot + board centered on felt */}
         <div className="absolute left-1/2 top-[34%] z-[1] w-max max-w-[90%] -translate-x-1/2 -translate-y-1/2 text-center">
           <div className="rounded-full bg-zinc-950/75 px-4 py-1.5 ring-1 ring-gold/35 backdrop-blur-sm">
             <p className="text-[9px] uppercase tracking-widest text-zinc-400">
@@ -353,6 +435,11 @@ export function PokerTable({
             <p className="text-[8px] text-zinc-500">
               Street {streetPot.toFixed(1)} + Dead {basePot.toFixed(1)}
             </p>
+            {handStatus === 'SHOWDOWN' && (
+              <p className="mt-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-300">
+                Showdown
+              </p>
+            )}
           </div>
         </div>
 
@@ -365,7 +452,6 @@ export function PokerTable({
         )}
       </div>
 
-      {/* Street bet badges — ลอยบน felt เยื้องเข้ากลาง; หายเมื่อ bet=0 (เปลี่ยนสตรีท) */}
       {Array.from({ length: SEAT_COUNT }, (_, index) => {
         const seatIndex = index as SeatIndex;
         const seat = seats[seatIndex];
@@ -379,7 +465,6 @@ export function PokerTable({
         );
       })}
 
-      {/* 6 locked absolute seat pods */}
       {Array.from({ length: SEAT_COUNT }, (_, index) => {
         const seatIndex = index as SeatIndex;
         return (
@@ -390,14 +475,14 @@ export function PokerTable({
             state={seats[seatIndex]}
             isHero={seatIndex === heroSeatIndex}
             isButton={seatIndex === btnSeatIndex}
-            isActive={seatIndex === activeSeatIndex}
+            isToAct={actingEnabled && seatIndex === actionSeatIndex}
             heroCards={seatIndex === heroSeatIndex ? heroCards : undefined}
             maxStreetBet={maxStreetBet}
             streetMode={getSeatStreetMode(seats[seatIndex], maxStreetBet)}
             pot={pot}
+            stage={stage}
             onSetButton={() => onSetBtnSeat(seatIndex)}
             onSetHero={() => onSetHeroSeat(seatIndex)}
-            onActivate={() => onActiveSeatChange(seatIndex)}
             onUpdate={(patch) => onUpdateSeat(seatIndex, patch)}
             betInputRef={(el) => registerBetInput(seatIndex, el)}
             style={PHYSICAL_SEAT_LAYOUT[seatIndex]}

@@ -7,6 +7,12 @@ export type Action = 'CHECK' | 'FOLD' | 'CALL' | 'RAISE';
 /** ช่วงของมือ */
 export type Stage = 'PREFLOP' | 'FLOP' | 'TURN' | 'RIVER';
 
+/**
+ * สถานะมือฝั่งโต๊ะเทรนนิ่ง (UI) — ไม่ส่งเข้า GTO engine
+ * SHOWDOWN = เปิดไพ่หลัง River / Family Pot รอเลือกผู้ชนะหรือ Chop
+ */
+export type HandStatus = 'PLAYING' | 'SHOWDOWN';
+
 /** ไพ่ 1 ใบ เช่น 'As', 'Kh', 'Td' */
 export type Card = string;
 
@@ -31,6 +37,16 @@ export interface PositionState {
   stack: number;
   betSize: number;
   folded: boolean;
+  /**
+   * แอคชั่นในสตรีทปัจจุบันแล้วหรือยัง (Fold/Check/Call/Raise)
+   * ใช้กับ Automated Street Transition — ไม่ส่งขึ้น API ก็ได้
+   */
+  hasActed?: boolean;
+  /**
+   * ชิปที่ผู้เล่นลงสะสมในแฮนด์นี้ (บลายด์ + call/raise ทุกรอบ)
+   * ใช้คิดกำไรสุทธิ: Total Pot − investedHand
+   */
+  investedHand?: number;
   /** Calling Station — คอลไม่เลิก */
   station?: boolean;
   /** Tight-Fold / Nit — หมอบบ่อย */

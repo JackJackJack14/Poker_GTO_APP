@@ -29,12 +29,12 @@ export function withPostedBlinds<T extends PositionState>(
   return seats.map((seat, seatIndex) => {
     const position = getPosition(seatIndex);
     if (position === 'SB') {
-      return { ...seat, betSize: sbAmt, folded: false };
+      return { ...seat, betSize: sbAmt, folded: false, investedHand: sbAmt };
     }
     if (position === 'BB') {
-      return { ...seat, betSize: bbAmt, folded: false };
+      return { ...seat, betSize: bbAmt, folded: false, investedHand: bbAmt };
     }
-    return { ...seat, betSize: 0 };
+    return { ...seat, betSize: 0, investedHand: 0 };
   });
 }
 

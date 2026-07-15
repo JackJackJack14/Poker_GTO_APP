@@ -35,22 +35,57 @@ export const PHYSICAL_SEAT_LAYOUT: readonly CSSProperties[] = [
 ];
 
 /**
- * Street bet badges บน felt — เยื้องจากเก้าอี้เข้าหาศูนย์กลางโต๊ะ
- * (พิกัดสัมพัทธ์กับ wrapper เดียวกับเก้าอี้)
+ * Street bet badges บน felt — เยื้องเข้ากลางมากขึ้น ให้อยู่เหนือกรอบเก้าอี้ชัดเจน
  */
 export const STREET_BET_BADGE_LAYOUT: readonly CSSProperties[] = [
-  // 0 BTN — เหนือเก้าอี้เข้าหาพ็อต
-  { left: '50%', bottom: '23%', top: 'auto', right: 'auto', transform: 'translateX(-50%)' },
-  // 1 SB — ขวาเยื้องเข้ากลาง
-  { left: '20%', bottom: '32%', top: 'auto', right: 'auto', transform: 'none' },
-  // 2 BB — ขวาเยื้องเข้ากลาง
-  { left: '20%', top: '28%', bottom: 'auto', right: 'auto', transform: 'none' },
-  // 3 UTG — ใต้เก้าอี้เข้าหาพ็อต
-  { left: '50%', top: '21%', bottom: 'auto', right: 'auto', transform: 'translateX(-50%)' },
-  // 4 MP — ซ้ายเยื้องเข้ากลาง
-  { right: '20%', top: '28%', bottom: 'auto', left: 'auto', transform: 'none' },
-  // 5 CO — ซ้ายเยื้องเข้ากลาง
-  { right: '20%', bottom: '32%', top: 'auto', left: 'auto', transform: 'none' },
+  // 0 BTN — สูงขึ้นจากเก้าอี้เข้าหาพ็อต
+  {
+    left: '50%',
+    bottom: '30%',
+    top: 'auto',
+    right: 'auto',
+    transform: 'translate(-50%, -6px)',
+  },
+  // 1 SB
+  {
+    left: '24%',
+    bottom: '36%',
+    top: 'auto',
+    right: 'auto',
+    transform: 'translateY(-4px)',
+  },
+  // 2 BB
+  {
+    left: '24%',
+    top: '24%',
+    bottom: 'auto',
+    right: 'auto',
+    transform: 'translateY(-8px)',
+  },
+  // 3 UTG — ต่ำลงจากขอบบนเข้าหาพ็อต
+  {
+    left: '50%',
+    top: '26%',
+    bottom: 'auto',
+    right: 'auto',
+    transform: 'translate(-50%, 4px)',
+  },
+  // 4 MP
+  {
+    right: '24%',
+    top: '24%',
+    bottom: 'auto',
+    left: 'auto',
+    transform: 'translateY(-8px)',
+  },
+  // 5 CO
+  {
+    right: '24%',
+    bottom: '36%',
+    top: 'auto',
+    left: 'auto',
+    transform: 'translateY(-4px)',
+  },
 ];
 
 export function getPositionLabel(

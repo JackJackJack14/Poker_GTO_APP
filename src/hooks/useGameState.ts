@@ -1,11 +1,26 @@
-import { useCallback, useMemo, useState } from 'react';
-import type { Card, GameState, PositionState, Stage } from '../types';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import type { Card, GameState, HandStatus, PositionState, Stage } from '../types';
 import { boardCardLimit } from '../lib/cards';
 import {
   calculateTotalPot,
   resetStreetBets,
   sumStreetBets,
 } from '../lib/potEngine';
+import {
+  applySeatStreetAction,
+  calcUncalledStreetBet,
+  checkStreetCompletion,
+  clearStreetBetsAndActs,
+  nextStreet,
+  stampInvestedHand,
+  sumSeatStreetBets,
+} from '../lib/streetTransition';
+import { openingActionSeat, resolveActionSeat } from '../lib/turnOrder';
+import {
+  calcNetRealProfit,
+  type HandResolvedRef,
+} from '../lib/evTracker';
+import { STARTING_STACK_BB } from '../lib/stackCapAdvice';
 import { computeBetContext } from '../../shared/lib/betContext';
 import {
   BIG_BLIND_BB,
@@ -14,41 +29,92 @@ import {
 } from '../../shared/lib/blinds';
 import {
   buildPositionsMap,
+  findSeatForPosition,
   getPositionLabel,
   type SeatIndex,
 } from '../lib/seatLayout';
 
+const HISTORY_MAX = 10;
+const SEAT_COUNT = 6;
+
+/**
+ * Snapshot โต๊ะสำหรับ Undo stack
+ * (ชื่อตามสเปก history — ไม่ใช่ API GameState ที่ส่งเข้า engine)
+ */
+export interface UndoGameState {
+  seats: PositionState[];
+  stage: Stage;
+  basePot: number;
+  heroCards: [Card | null, Card | null];
+  boardCards: (Card | null)[];
+  actionSeatIndex: SeatIndex;
+  status: HandStatus;
+  btnSeatIndex: SeatIndex;
+  heroSeatIndex: SeatIndex;
+  /** ยอดลงทุนสะสมทุกเก้าอี้ทั้งแฮนด์ (ไม่รีเซ็ตข้ามสตรีท) */
+  handInvested: number[];
+}
+
+function deepCloneSeat(seat: PositionState): PositionState {
+  return { ...seat };
+}
+
+function deepCloneSnapshot(snap: UndoGameState): UndoGameState {
+  return {
+    seats: snap.seats.map(deepCloneSeat),
+    stage: snap.stage,
+    basePot: snap.basePot,
+    heroCards: [snap.heroCards[0], snap.heroCards[1]],
+    boardCards: [...snap.boardCards],
+    actionSeatIndex: snap.actionSeatIndex,
+    status: snap.status,
+    btnSeatIndex: snap.btnSeatIndex,
+    heroSeatIndex: snap.heroSeatIndex,
+    handInvested: [...snap.handInvested],
+  };
+}
+
+function ledgerFromSeats(seats: readonly PositionState[]): number[] {
+  return seats.map((s) =>
+    Math.max(0, Math.round((s.investedHand ?? s.betSize ?? 0) * 100) / 100),
+  );
+}
+
 function createFreshSeats(): PositionState[] {
-  return Array.from({ length: 6 }, () => ({
-    stack: 100,
+  return Array.from({ length: SEAT_COUNT }, () => ({
+    stack: STARTING_STACK_BB,
     betSize: 0,
     folded: false,
+    hasActed: false,
+    investedHand: 0,
     station: false,
     tight: false,
   }));
 }
 
-/** เก้าอี้พร้อมบลายด์ตามปุ่ม Dealer (SB 0.5 / BB 1.0) */
 function createBlindedSeats(btnSeatIndex: SeatIndex): PositionState[] {
-  return withPostedBlinds(createFreshSeats(), (seatIndex) =>
+  const blinded = withPostedBlinds(createFreshSeats(), (seatIndex) =>
     getPositionLabel(seatIndex, btnSeatIndex),
-  );
+  ).map((seat) => ({
+    ...seat,
+    hasActed: false,
+    investedHand: seat.investedHand ?? seat.betSize,
+    stack: STARTING_STACK_BB - (seat.investedHand ?? seat.betSize ?? 0),
+  }));
+  return blinded;
 }
 
 /**
- * Positional Automation:
- * - อ้างอิงปุ่ม D → เก้าอี้ถัดไป = SB (0.5) แล้ว BB (1.0)
- * - Total Pot เริ่มที่ 1.5 BB จากบลายด์บนเก้าอี้
- * - เมื่อเลื่อนสตรีท บลายด์/เดิมพันถูกย้ายเข้า Dead Pot อัตโนมัติ
+ * Table state + auto street / auto hand-end (fold around)
+ * ห้ามแตะ GTO engine — ไฟล์นี้ควบคุม UI state เท่านั้น
  */
-export function useGameState() {
+export function useGameState(handResolvedRef?: HandResolvedRef) {
   const [btnSeatIndex, setBtnSeatIndex] = useState<SeatIndex>(0);
   const [heroSeatIndex, setHeroSeatIndex] = useState<SeatIndex>(0);
   const [seats, setSeats] = useState<PositionState[]>(() =>
     createBlindedSeats(0),
   );
   const [stage, setStage] = useState<Stage>('PREFLOP');
-  /** Dead pot — เริ่ม 0; รับเงินจากสตรีทก่อนหน้าเมื่อเปลี่ยนสตรีท */
   const [basePot, setBasePot] = useState(0);
   const [heroCards, setHeroCards] = useState<[Card | null, Card | null]>([
     null,
@@ -61,6 +127,58 @@ export function useGameState() {
     null,
     null,
   ]);
+  const [actionSeatIndex, setActionSeatIndex] = useState<SeatIndex>(() =>
+    findSeatForPosition('UTG', 0),
+  );
+  /** PLAYING = กำลังแอคชั่น | SHOWDOWN = รอเลือกชนะ/Chop (Family Pot) */
+  const [status, setStatus] = useState<HandStatus>('PLAYING');
+  /** ประวัติ Undo — สูงสุด 10 ขั้นตอน */
+  const [history, setHistory] = useState<UndoGameState[]>([]);
+
+  /** Ledger ยอดลงทุนสะสมทั้งแฮนด์ต่อเก้าอี้ — ไม่รีเซ็ตตอนเปลี่ยนสตรีท */
+  const handInvestedRef = useRef<number[]>(
+    ledgerFromSeats(createBlindedSeats(0)),
+  );
+
+  const stageRef = useRef(stage);
+  stageRef.current = stage;
+  const btnSeatRef = useRef(btnSeatIndex);
+  btnSeatRef.current = btnSeatIndex;
+  const actionSeatRef = useRef(actionSeatIndex);
+  actionSeatRef.current = actionSeatIndex;
+  const basePotRef = useRef(basePot);
+  basePotRef.current = basePot;
+  const heroSeatRef = useRef(heroSeatIndex);
+  heroSeatRef.current = heroSeatIndex;
+  const heroCardsRef = useRef(heroCards);
+  heroCardsRef.current = heroCards;
+  const boardCardsRef = useRef(boardCards);
+  boardCardsRef.current = boardCards;
+  const statusRef = useRef(status);
+  statusRef.current = status;
+  const seatsRef = useRef(seats);
+  seatsRef.current = seats;
+  const historyRef = useRef(history);
+  historyRef.current = history;
+
+  const applyInvestedLedger = useCallback(
+    (nextSeats: PositionState[]): PositionState[] => {
+      const stamped = stampInvestedHand(nextSeats, handInvestedRef.current);
+      return stamped.map((seat, i) => {
+        const invested = handInvestedRef.current[i] ?? 0;
+        return {
+          ...seat,
+          investedHand: invested,
+          stack: Math.max(0, STARTING_STACK_BB - invested),
+        };
+      });
+    },
+    [],
+  );
+
+  const resetInvestedLedger = useCallback((nextSeats: PositionState[]) => {
+    handInvestedRef.current = ledgerFromSeats(nextSeats);
+  }, []);
 
   const positions = useMemo(
     () => buildPositionsMap(seats, btnSeatIndex),
@@ -79,6 +197,29 @@ export function useGameState() {
 
   const streetPot = useMemo(() => sumStreetBets(positions), [positions]);
 
+  /** ยอดชิปที่ Hero จ่ายสะสม Prefop→River (ห้ามรีเซ็ตข้ามสตรีท) */
+  const totalInvestedAcrossHand = useMemo(() => {
+    const seat = seats[heroSeatIndex];
+    return Math.max(0, seat?.investedHand ?? 0);
+  }, [seats, heroSeatIndex]);
+
+  const heroInvested = totalInvestedAcrossHand;
+
+  /** ชิปเหลือจริง: 100 − totalInvestedAcrossHand */
+  const remainingStack = useMemo(
+    () =>
+      Math.max(
+        0,
+        Math.round((STARTING_STACK_BB - totalInvestedAcrossHand) * 100) / 100,
+      ),
+    [totalInvestedAcrossHand],
+  );
+
+  const activePlayerCount = useMemo(
+    () => seats.filter((s) => !s.folded).length,
+    [seats],
+  );
+
   const usedCards = useMemo(() => {
     const cards = new Set<Card>();
     for (const c of heroCards) {
@@ -90,24 +231,234 @@ export function useGameState() {
     return cards;
   }, [heroCards, boardCards]);
 
-  const updateSeat = useCallback(
-    (seatIndex: SeatIndex, patch: Partial<PositionState>) => {
-      setSeats((prev) =>
-        prev.map((seat, index) =>
-          index === seatIndex ? { ...seat, ...patch } : seat,
-        ),
-      );
+  const captureSnapshot = useCallback((): UndoGameState => {
+    return deepCloneSnapshot({
+      seats: seatsRef.current,
+      stage: stageRef.current,
+      basePot: basePotRef.current,
+      heroCards: heroCardsRef.current,
+      boardCards: boardCardsRef.current,
+      actionSeatIndex: actionSeatRef.current,
+      status: statusRef.current,
+      btnSeatIndex: btnSeatRef.current,
+      heroSeatIndex: heroSeatRef.current,
+      handInvested: [...handInvestedRef.current],
+    });
+  }, []);
+
+  const pushHistory = useCallback(() => {
+    const snap = captureSnapshot();
+    setHistory((prev) => [...prev, snap].slice(-HISTORY_MAX));
+  }, [captureSnapshot]);
+
+  const clearHistory = useCallback(() => {
+    setHistory([]);
+  }, []);
+
+  const applySnapshot = useCallback(
+    (snap: UndoGameState) => {
+      const clone = deepCloneSnapshot(snap);
+      handInvestedRef.current = [...clone.handInvested];
+      setSeats(applyInvestedLedger(clone.seats));
+      setStage(clone.stage);
+      setBasePot(clone.basePot);
+      setHeroCards(clone.heroCards);
+      setBoardCards(clone.boardCards);
+      setActionSeatIndex(clone.actionSeatIndex);
+      setStatus(clone.status);
+      setBtnSeatIndex(clone.btnSeatIndex);
+      setHeroSeatIndex(clone.heroSeatIndex);
     },
-    [],
+    [applyInvestedLedger],
   );
 
-  /** เปลี่ยนปุ่ม D → โพสต์บลายด์ใหม่ตามวงกลม 6-Max */
-  const setBtnSeat = useCallback((seatIndex: SeatIndex) => {
-    setBtnSeatIndex(seatIndex);
-    setSeats(createBlindedSeats(seatIndex));
+  const handleUndo = useCallback(() => {
+    const prev = historyRef.current;
+    if (prev.length === 0) return;
+    const snap = prev[prev.length - 1];
+    setHistory(prev.slice(0, -1));
+    applySnapshot(snap);
+  }, [applySnapshot]);
+
+  const clearHandInputs = useCallback(() => {
+    const btn = btnSeatRef.current;
+    const blinded = createBlindedSeats(btn);
+    resetInvestedLedger(blinded);
+    setHeroCards([null, null]);
+    setBoardCards([null, null, null, null, null]);
     setStage('PREFLOP');
     setBasePot(0);
-  }, []);
+    setSeats(applyInvestedLedger(blinded));
+    setStatus('PLAYING');
+    setActionSeatIndex(openingActionSeat(blinded, btn, 'PREFLOP'));
+    clearHistory();
+  }, [applyInvestedLedger, clearHistory, resetInvestedLedger]);
+
+  /** จบแฮนด์: แจ้งสถิติ (กำไรสุทธิ) แล้ว reset โต๊ะ */
+  const handleHandEnd = useCallback(
+    (
+      seatsSnapshot: PositionState[],
+      options?: { forceHeroLoss?: boolean },
+    ) => {
+      const heroIdx = heroSeatRef.current;
+      const survivors = seatsSnapshot
+        .map((s, i) => ({ s, i }))
+        .filter(({ s }) => !s.folded);
+      const survivor = survivors.length === 1 ? survivors[0] : null;
+      // Hero Fold Early Exit → แพ้ทันที (ไม่รอคิวคนอื่น)
+      const heroWon = options?.forceHeroLoss
+        ? false
+        : survivor !== null && survivor.i === heroIdx;
+
+      const rawPot = basePotRef.current + sumSeatStreetBets(seatsSnapshot);
+      // Fold-around win: หัก Uncalled Bet ออกจากพ็อตก่อนคิดกำไรสุทธิ
+      const uncalled =
+        heroWon && survivor !== null
+          ? calcUncalledStreetBet(seatsSnapshot)
+          : 0;
+      const totalPot = Math.max(0, rawPot - uncalled);
+
+      const invested = Math.max(
+        0,
+        handInvestedRef.current[heroIdx] ??
+          seatsSnapshot[heroIdx]?.investedHand ??
+          0,
+      );
+      // แพ้ → −totalInvestedAcrossHand
+      const netProfit = calcNetRealProfit(
+        totalPot,
+        invested,
+        heroWon ? 'win' : 'lose',
+      );
+      const btn = btnSeatRef.current;
+
+      queueMicrotask(() => {
+        handResolvedRef?.current?.({
+          heroWon,
+          totalPot,
+          heroInvested: invested,
+          netProfit,
+          stage: stageRef.current,
+          heroPosition: getPositionLabel(heroIdx, btn),
+          heroCards: heroCardsRef.current,
+          boardCards: boardCardsRef.current,
+          reason: options?.forceHeroLoss ? 'hero-fold' : 'fold-around',
+        });
+        clearHandInputs();
+      });
+    },
+    [clearHandInputs, handResolvedRef],
+  );
+
+  const advanceStreetAutomatically = useCallback(
+    (seatsSnapshot: PositionState[]): PositionState[] => {
+      const streetSum = sumSeatStreetBets(seatsSnapshot);
+      const upcoming = nextStreet(stageRef.current);
+      const btn = btnSeatRef.current;
+
+      if (!upcoming) {
+        // River จบ + มี ≥2 คน → SHOWDOWN (Family Pot / Chop) ไม่ auto-resolve
+        queueMicrotask(() => {
+          setStatus('SHOWDOWN');
+        });
+        return applyInvestedLedger(seatsSnapshot);
+      }
+
+      setBasePot((base) => base + streetSum);
+      setStage(upcoming);
+      const limit = boardCardLimit(upcoming);
+      setBoardCards((prev) => prev.map((c, i) => (i < limit ? c : null)));
+
+      // ล้าง betSize ของสตรีท — คง handInvested ledger / investedHand
+      const cleared = applyInvestedLedger(clearStreetBetsAndActs(seatsSnapshot));
+      queueMicrotask(() => {
+        setActionSeatIndex(openingActionSeat(cleared, btn, upcoming));
+      });
+      return cleared;
+    },
+    [applyInvestedLedger],
+  );
+
+  const updateSeat = useCallback(
+    (seatIndex: SeatIndex, patch: Partial<PositionState>) => {
+      if (statusRef.current === 'SHOWDOWN') return;
+
+      const isStreetAction =
+        patch.folded !== undefined || patch.betSize !== undefined;
+
+      if (isStreetAction) {
+        if (seatIndex !== actionSeatRef.current) return;
+        pushHistory();
+      }
+
+      setSeats((prev) => {
+        if (isStreetAction && seatIndex !== actionSeatRef.current) {
+          return prev;
+        }
+
+        const beforeBet = prev[seatIndex]?.betSize ?? 0;
+        let next = applySeatStreetAction(prev, seatIndex, patch);
+
+        if (typeof patch.betSize === 'number') {
+          const delta = Math.max(0, patch.betSize - beforeBet);
+          if (delta > 0) {
+            const cur = handInvestedRef.current[seatIndex] ?? 0;
+            handInvestedRef.current[seatIndex] =
+              Math.round((cur + delta) * 100) / 100;
+          }
+        }
+
+        next = applyInvestedLedger(next);
+        if (!isStreetAction) return next;
+
+        // Hero Fold Early Exit — ตัดจบทันที ไม่ส่งคิวต่อ / ไม่รอโชว์ดาวน์
+        if (patch.folded === true && seatIndex === heroSeatRef.current) {
+          handleHandEnd(next, { forceHeroLoss: true });
+          return next;
+        }
+
+        const completion = checkStreetCompletion(next);
+        const btn = btnSeatRef.current;
+        const currentStage = stageRef.current;
+
+        if (completion.status === 'hand-over') {
+          handleHandEnd(next);
+          return next;
+        }
+
+        if (completion.status === 'street-complete') {
+          return advanceStreetAutomatically(next);
+        }
+
+        const nextActor = resolveActionSeat(
+          next,
+          btn,
+          currentStage,
+          seatIndex,
+        );
+        if (nextActor !== null) {
+          queueMicrotask(() => setActionSeatIndex(nextActor));
+        }
+        return next;
+      });
+    },
+    [advanceStreetAutomatically, applyInvestedLedger, handleHandEnd, pushHistory],
+  );
+
+  const setBtnSeat = useCallback(
+    (seatIndex: SeatIndex) => {
+      const blinded = createBlindedSeats(seatIndex);
+      resetInvestedLedger(blinded);
+      setBtnSeatIndex(seatIndex);
+      setSeats(applyInvestedLedger(blinded));
+      setStage('PREFLOP');
+      setBasePot(0);
+      setStatus('PLAYING');
+      setActionSeatIndex(openingActionSeat(blinded, seatIndex, 'PREFLOP'));
+      clearHistory();
+    },
+    [applyInvestedLedger, clearHistory, resetInvestedLedger],
+  );
 
   const setHeroSeat = useCallback((seatIndex: SeatIndex) => {
     setHeroSeatIndex(seatIndex);
@@ -131,26 +482,37 @@ export function useGameState() {
 
   const handleStageChange = useCallback(
     (newStage: Stage) => {
+      pushHistory();
       setSeats((prevSeats) => {
         const prevPositions = buildPositionsMap(prevSeats, btnSeatIndex);
-        // บลายด์ 1.5 (+ raises) เข้า Dead Pot
         setBasePot((base) => base + sumStreetBets(prevPositions));
         const resetPositions = resetStreetBets(prevPositions);
-        return prevSeats.map((seat, seatIndex) => {
+        const nextSeats = prevSeats.map((seat, seatIndex) => {
           const label = getPositionLabel(seatIndex, btnSeatIndex);
           const reset = resetPositions[label];
           return {
             ...reset,
+            hasActed: false,
+            // คงยอดสะสมทั้งแฮนด์จาก ledger — ห้ามรีเซ็ตตอนเปลี่ยนสตรีท
+            investedHand: handInvestedRef.current[seatIndex] ?? 0,
             station: seat.station ?? false,
             tight: seat.tight ?? false,
           };
         });
+        const stamped = applyInvestedLedger(nextSeats);
+        queueMicrotask(() => {
+          setActionSeatIndex(
+            openingActionSeat(stamped, btnSeatIndex, newStage),
+          );
+        });
+        return stamped;
       });
       setStage(newStage);
+      setStatus('PLAYING');
       const limit = boardCardLimit(newStage);
       setBoardCards((prev) => prev.map((c, i) => (i < limit ? c : null)));
     },
-    [btnSeatIndex],
+    [applyInvestedLedger, btnSeatIndex, pushHistory],
   );
 
   const buildGameState = useCallback((): GameState | null => {
@@ -201,42 +563,60 @@ export function useGameState() {
 
   const resetTable = useCallback(() => {
     const btn: SeatIndex = 0;
+    const blinded = createBlindedSeats(btn);
+    resetInvestedLedger(blinded);
     setBtnSeatIndex(btn);
     setHeroSeatIndex(0);
     setStage('PREFLOP');
     setBasePot(0);
-    setSeats(createBlindedSeats(btn));
+    setSeats(applyInvestedLedger(blinded));
+    setStatus('PLAYING');
+    setActionSeatIndex(openingActionSeat(blinded, btn, 'PREFLOP'));
     setHeroCards([null, null]);
     setBoardCards([null, null, null, null, null]);
-  }, []);
+    clearHistory();
+  }, [applyInvestedLedger, clearHistory, resetInvestedLedger]);
 
-  /** Preflop → โพสต์บลายด์ใหม่; Postflop → ล้างยอด street (Dead คงเดิม) */
   const resetStreetActions = useCallback(() => {
+    if (statusRef.current === 'SHOWDOWN') return;
+    pushHistory();
     setSeats((prev) => {
+      let next: PositionState[];
       if (stage === 'PREFLOP') {
-        return withPostedBlinds(prev, (seatIndex) =>
+        // รีเซ็ตพรีฟลอปกลับบลายด์ — ลงทุนเริ่มใหม่ที่บลายด์เท่านั้น
+        next = withPostedBlinds(createFreshSeats(), (seatIndex) =>
           getPositionLabel(seatIndex, btnSeatIndex),
-        );
+        ).map((seat, i) => ({
+          ...seat,
+          hasActed: false,
+          folded: prev[i]?.folded ?? false,
+          station: prev[i]?.station ?? false,
+          tight: prev[i]?.tight ?? false,
+          investedHand: seat.investedHand ?? seat.betSize,
+        }));
+        resetInvestedLedger(next);
+      } else {
+        // โพสต์ฟลอป: ล้างยอดสตรีทอย่างเดียว — คง ledger ลงทุนทั้งแฮนด์
+        next = prev.map((seat, i) => ({
+          ...seat,
+          betSize: 0,
+          hasActed: false,
+          investedHand: handInvestedRef.current[i] ?? seat.investedHand ?? 0,
+        }));
       }
-      return prev.map((seat) => ({
-        ...seat,
-        betSize: 0,
-      }));
+      const stamped = applyInvestedLedger(next);
+      queueMicrotask(() => {
+        setActionSeatIndex(openingActionSeat(stamped, btnSeatIndex, stage));
+      });
+      return stamped;
     });
-  }, [btnSeatIndex, stage]);
-
-  /** แฮนด์ใหม่: ล้างไพ่ + โพสต์บลายด์ → Total Pot = 1.5 BB */
-  const clearHandInputs = useCallback(() => {
-    setHeroCards([null, null]);
-    setBoardCards([null, null, null, null, null]);
-    setStage('PREFLOP');
-    setBasePot(0);
-    setSeats((prev) =>
-      withPostedBlinds(prev, (seatIndex) =>
-        getPositionLabel(seatIndex, btnSeatIndex),
-      ),
-    );
-  }, [btnSeatIndex]);
+  }, [
+    applyInvestedLedger,
+    btnSeatIndex,
+    pushHistory,
+    resetInvestedLedger,
+    stage,
+  ]);
 
   return {
     btnSeatIndex,
@@ -247,8 +627,13 @@ export function useGameState() {
     setHeroSeat,
     stage,
     setStage: handleStageChange,
+    /** PLAYING | SHOWDOWN — ใช้คุมปุ่มเปิดไพ่ / Chop */
+    status,
+    activePlayerCount,
     positions,
     updateSeat,
+    actionSeatIndex,
+    setActionSeatIndex,
     heroCards,
     selectHeroCard,
     boardCards,
@@ -256,6 +641,13 @@ export function useGameState() {
     pot,
     basePot,
     streetPot,
+    /** ชิปที่ Hero ลงสะสมทั้งแฮนด์ (alias ของ totalInvestedAcrossHand) */
+    heroInvested,
+    /** ยอดสะสม Prefop+Flop+Turn+River — ไม่รีเซ็ตข้ามสตรีท */
+    totalInvestedAcrossHand,
+    /** 100 − totalInvestedAcrossHand — เพดาน All-in */
+    remainingStack,
+    startingStack: STARTING_STACK_BB,
     setBasePot,
     usedCards,
     buildGameState,
@@ -264,6 +656,10 @@ export function useGameState() {
     resetStreetActions,
     clearHandInputs,
     startingBlindsTotal: STARTING_BLINDS_TOTAL_BB,
+    /** Undo history (สูงสุด 10) */
+    history,
+    canUndo: history.length > 0,
+    handleUndo,
   };
 }
 

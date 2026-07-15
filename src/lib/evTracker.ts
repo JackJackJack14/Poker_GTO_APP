@@ -1,4 +1,5 @@
-import type { GtoResponse, Position, Stage } from '../types';
+import type { Card, GtoResponse, Position, Stage } from '../types';
+import type { MutableRefObject } from 'react';
 
 const STORAGE_KEY = 'poker-gto-ev-session-v2';
 const LEGACY_KEY = 'poker-gto-ev-session-v1';
@@ -7,11 +8,11 @@ export interface EvHandRecord {
   id: string;
   ts: number;
   ev: number;
-  /** ผลจริงของแฮนด์ (BB) — null = ยังไม่บันทึก */
+  /** ผลจริงสุทธิของแฮนด์ (BB) — null = ยังไม่บันทึก */
   actualResult: number | null;
   equity: number;
   pot: number;
-  /** ยอดที่ Hero ลงบนโต๊ะ ณ ตอนวิเคราะห์ (ใช้ตอนแพ้) */
+  /** ยอดที่ Hero ลงทุนสะสมในแฮนด์ */
   heroBetSize: number;
   heroPosition: Position;
   stage: Stage;
@@ -25,6 +26,20 @@ export interface EvSessionState {
   hands: EvHandRecord[];
   cumulativeEv: number[];
   cumulativeReal: number[];
+}
+
+export interface HandResolvedPayload {
+  heroWon: boolean;
+  totalPot: number;
+  heroInvested: number;
+  /** Total Pot − Hero Invested เมื่อชนะ / −Hero Invested เมื่อแพ้ */
+  netProfit: number;
+  stage: Stage;
+  heroPosition: Position;
+  heroCards: [Card | null, Card | null];
+  boardCards: (Card | null)[];
+  /** สาเหตุจบแฮนด์ (UI flash) */
+  reason?: 'hero-fold' | 'fold-around';
 }
 
 function emptySession(): EvSessionState {
@@ -67,6 +82,40 @@ function migrateHand(raw: Partial<EvHandRecord> & { ev: number }): EvHandRecord 
     decisionSnippet: raw.decisionSnippet ?? '',
   };
 }
+
+/**
+ * กำไรสุทธิเงินจริง:
+ * ชนะ → Total Pot − ชิปที่ Hero ลงทั้งแฮนด์
+ * แพ้ → −ชิปที่ Hero ลงทั้งแฮนด์
+ * Chop n คน → (Total Pot / n) − Hero Invested
+ * (ห้ามใช้ค่าคงที่ 1.5 BB)
+ */
+export function calcNetRealProfit(
+  totalPot: number,
+  heroInvested: number,
+  outcome: 'win' | 'lose',
+): number {
+  const pot = Math.max(0, totalPot);
+  const invested = Math.max(0, heroInvested);
+  if (outcome === 'win') {
+    return Math.round((pot - invested) * 100) / 100;
+  }
+  return Math.round(-invested * 100) / 100;
+}
+
+/** Split Pot / Chop: (Total Pot / n) − Hero Invested */
+export function calcSplitPotProfit(
+  totalPot: number,
+  heroInvested: number,
+  splitWays: number,
+): number {
+  const n = Math.max(2, Math.floor(splitWays));
+  const share = Math.max(0, totalPot) / n;
+  const invested = Math.max(0, heroInvested);
+  return Math.round((share - invested) * 100) / 100;
+}
+
+export type ActualOutcome = 'win' | 'lose' | 'split';
 
 export function loadEvSession(): EvSessionState {
   try {
@@ -133,49 +182,100 @@ export function appendEvHand(params: {
   return persist(withSeries([...session.hands, record].slice(-200)));
 }
 
+function resolveTargetIndex(
+  session: EvSessionState,
+  handId?: string | null,
+): number {
+  if (session.hands.length === 0) return -1;
+  if (handId) {
+    const found = session.hands.findIndex((h) => h.id === handId);
+    if (found >= 0) return found;
+  }
+  for (let i = session.hands.length - 1; i >= 0; i--) {
+    if (session.hands[i].actualResult === null) return i;
+  }
+  return session.hands.length - 1;
+}
+
 /**
- * บันทึกผลจริงท้ายแฮนด์
- * - win → +totalPot
- * - lose → −heroBet (จ่ายทิ้ง)
+ * บันทึกผลจริงท้ายแฮนด์ (สูตรสุทธิ)
+ * win → TotalPot − HeroInvested
+ * lose → −HeroInvested
+ * split → (TotalPot / n) − HeroInvested
  */
 export function recordActualResult(params: {
   handId?: string | null;
-  outcome: 'win' | 'lose';
-  /** Pot ปัจจุบันตอนกดชนะ */
+  outcome: ActualOutcome;
   totalPot: number;
-  /** ยอด Hero จ่าย (ถ้าไม่ส่ง ใช้ที่บันทึกตอน analyze) */
-  heroBetSize?: number;
+  heroInvested: number;
+  /** จำนวนคนหารพ็อต เมื่อ outcome = 'split' (2 หรือ 3) */
+  splitWays?: number;
 }): EvSessionState {
   const session = loadEvSession();
-  if (session.hands.length === 0) return session;
+  const netProfit =
+    params.outcome === 'split'
+      ? calcSplitPotProfit(
+          params.totalPot,
+          params.heroInvested,
+          params.splitWays ?? 2,
+        )
+      : calcNetRealProfit(
+          params.totalPot,
+          params.heroInvested,
+          params.outcome,
+        );
 
-  let idx = session.hands.length - 1;
-  if (params.handId) {
-    const found = session.hands.findIndex((h) => h.id === params.handId);
-    if (found >= 0) idx = found;
-  } else {
-    for (let i = session.hands.length - 1; i >= 0; i--) {
-      if (session.hands[i].actualResult === null) {
-        idx = i;
-        break;
-      }
-    }
+  const snippet =
+    params.outcome === 'win'
+      ? 'Hero wins pot'
+      : params.outcome === 'lose'
+        ? 'Hero loses showdown'
+        : `Split pot / ${params.splitWays ?? 2}-way chop`;
+
+  let idx = resolveTargetIndex(session, params.handId);
+  if (idx < 0) {
+    const stub: EvHandRecord = {
+      id: `${Date.now()}-auto`,
+      ts: Date.now(),
+      ev: 0,
+      actualResult: netProfit,
+      equity: 0,
+      pot: params.totalPot,
+      heroBetSize: params.heroInvested,
+      heroPosition: 'BTN',
+      stage: 'RIVER',
+      heroCards: ['??', '??'],
+      boardCards: [],
+      decisionSnippet: snippet,
+    };
+    return persist(withSeries([...session.hands, stub].slice(-200)));
   }
 
-  const hand = session.hands[idx];
-  const heroBet = Math.max(
-    0,
-    params.heroBetSize ?? hand.heroBetSize ?? 0,
-  );
-  const actualResult =
-    params.outcome === 'win'
-      ? Math.round(Math.max(0, params.totalPot) * 100) / 100
-      : Math.round(-heroBet * 100) / 100;
-
   const hands = session.hands.map((h, i) =>
-    i === idx ? { ...h, actualResult, pot: params.totalPot || h.pot } : h,
+    i === idx
+      ? {
+          ...h,
+          actualResult: netProfit,
+          pot: params.totalPot || h.pot,
+          heroBetSize: params.heroInvested,
+          decisionSnippet: h.decisionSnippet || snippet,
+        }
+      : h,
   );
   return persist(withSeries(hands));
+}
+
+/** จาก payload จบแฮนด์อัตโนมัติ (fold around / sole survivor) */
+export function recordHandResolved(
+  payload: HandResolvedPayload,
+  handId?: string | null,
+): EvSessionState {
+  return recordActualResult({
+    handId,
+    outcome: payload.heroWon ? 'win' : 'lose',
+    totalPot: payload.totalPot,
+    heroInvested: payload.heroInvested,
+  });
 }
 
 export function totalSessionEv(session: EvSessionState): number {
@@ -196,3 +296,6 @@ export function getLatestPendingHand(
   }
   return null;
 }
+
+export type HandResolvedHandler = (payload: HandResolvedPayload) => void;
+export type HandResolvedRef = MutableRefObject<HandResolvedHandler | null>;

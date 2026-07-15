@@ -278,9 +278,10 @@ export function useGrindingHotkeys({
         return;
       }
 
+      // 1–6 ไม่ย้ายคิวแอคชั่น — โฟกัสเฉพาะที่ถึงคิวเท่านั้น (กันคลิก/คีย์สลับคน)
       if (lower >= '1' && lower <= '6') {
         e.preventDefault();
-        cb.focusBetInput((Number(lower) - 1) as SeatIndex);
+        cb.focusBetInput(s.activeSeatIndex);
       }
     };
 
