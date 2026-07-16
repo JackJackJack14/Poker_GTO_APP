@@ -17,7 +17,7 @@ export function HotkeyLegend() {
   }
 
   return (
-    <aside className="fixed bottom-4 left-4 z-40 w-52 rounded-xl border border-zinc-700/60 bg-zinc-950/92 p-3 text-[10px] leading-relaxed text-zinc-400 shadow-xl backdrop-blur-md">
+    <aside className="fixed bottom-4 left-4 z-40 w-56 rounded-xl border border-zinc-700/60 bg-zinc-950/92 p-3 text-[10px] leading-relaxed text-zinc-400 shadow-xl backdrop-blur-md">
       <div className="mb-2 flex items-center justify-between">
         <span className="font-bold uppercase tracking-widest text-gold">
           Grinding Mode
@@ -32,38 +32,42 @@ export function HotkeyLegend() {
         </button>
       </div>
 
-      <p className="mb-1.5 font-semibold text-zinc-300">ไพ่ (พิมพ์เลยได้)</p>
+      <p className="mb-1.5 font-semibold text-zinc-300">ไพ่ด่วน (Primary)</p>
       <ul className="mb-2 space-y-0.5 pl-1">
         <li>
-          <kbd className="text-gold">AsKd</kbd> → เลือกไพ่ติดกัน
+          <kbd className="rounded bg-zinc-800 px-1 text-gold">Tab</kbd> โฟกัส
+          Quick Card
         </li>
         <li>
-          <kbd className="text-zinc-300">a k q j t</kbd> = A K Q J T
+          <kbd className="text-gold">AsKd</kbd> → Hero ·{' '}
+          <kbd className="text-gold">KsJhTs</kbd> → Flop
         </li>
         <li>
           <kbd className="text-zinc-300">s h d c</kbd> = ♠ ♥ ♦ ♣
         </li>
-        <li className="text-zinc-500">ไม่ต้องคลิกช่อง — ระบบโฟกัสช่องว่างให้อัตโนมัติ</li>
+        <li className="text-zinc-500">Enter ยืนยัน · Esc ล้างช่อง</li>
       </ul>
 
-      <p className="mb-1.5 font-semibold text-zinc-300">Action (เลือกเก้าอี้)</p>
+      <p className="mb-1.5 font-semibold text-zinc-300">Action (คิวปัจจุบัน)</p>
       <ul className="mb-2 space-y-0.5 pl-1">
         <li>
           <kbd className="rounded bg-zinc-800 px-1 text-gold">f</kbd> Fold
         </li>
         <li>
-          <kbd className="rounded bg-zinc-800 px-1 text-gold">c</kbd> Check / Call
+          <kbd className="rounded bg-zinc-800 px-1 text-gold">c</kbd> Check /
+          Call
         </li>
         <li>
-          <kbd className="rounded bg-zinc-800 px-1 text-gold">r</kbd> โฟกัส Bet/Raise
+          <kbd className="rounded bg-zinc-800 px-1 text-gold">r</kbd> โฟกัส Raise
         </li>
         <li>
-          <kbd className="rounded bg-zinc-800 px-1 text-gold">1-6</kbd> โฟกัส Bet เก้าอี้
+          <kbd className="rounded bg-zinc-800 px-1 text-gold">Enter</kbd>{' '}
+          ยืนยันยอด Raise
         </li>
       </ul>
 
       <p className="text-[9px] text-zinc-500">
-        คลิกแผงควบคุมเก้าอี้เพื่อเลือกตำแหน่งก่อนกด f/c/r
+        ไม่ทำงานตอนโฟกัสช่องตัวเลข · Hero Fold ตัดจบแฮนด์อัตโนมัติ
       </p>
     </aside>
   );

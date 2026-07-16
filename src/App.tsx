@@ -44,12 +44,15 @@ export default function App() {
     null,
   );
   const [cardTarget, setCardTarget] = useState<CardSelectTarget | null>(null);
+  const [quickCardText, setQuickCardText] = useState('');
+  const [quickCardFlash, setQuickCardFlash] = useState<string | null>(null);
   const [evSession, setEvSession] = useState<EvSessionState>(() =>
     loadEvSession(),
   );
   const [lastHandId, setLastHandId] = useState<string | null>(null);
   const [actualFlash, setActualFlash] = useState<string | null>(null);
   const betInputRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const quickCardInputRef = useRef<HTMLInputElement | null>(null);
   const analyzeInFlightRef = useRef(false);
   const lastAnalyzeClickRef = useRef(0);
   const lastHandIdRef = useRef<string | null>(null);
@@ -165,9 +168,37 @@ export default function App() {
 
   const focusBetInput = useCallback((seatIndex: SeatIndex) => {
     requestAnimationFrame(() => {
-      betInputRefs.current[seatIndex]?.focus();
+      const el = betInputRefs.current[seatIndex];
+      if (!el) return;
+      el.focus();
+      el.select();
     });
   }, []);
+
+  const submitQuickCardCommand = useCallback(() => {
+    const result = game.applyQuickCardText(quickCardText);
+    setQuickCardFlash(result.message);
+    if (result.ok) {
+      setQuickCardText('');
+      setCardTarget(null);
+    }
+    window.setTimeout(() => setQuickCardFlash(null), 2200);
+  }, [game, quickCardText]);
+
+  // Tab → โฟกัส Quick Card Command Bar
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab' || e.shiftKey) return;
+      if (adviceOpen || game.status === 'SHOWDOWN') return;
+      e.preventDefault();
+      e.stopPropagation();
+      quickCardInputRef.current?.focus();
+      quickCardInputRef.current?.select();
+    };
+    window.addEventListener('keydown', onKeyDown, { capture: true });
+    return () =>
+      window.removeEventListener('keydown', onKeyDown, { capture: true });
+  }, [adviceOpen, game.status]);
 
   // โฟกัสช่อง Bet ของคนที่ถึงคิวอัตโนมัติ (ยกเว้น Showdown)
   useEffect(() => {
@@ -324,7 +355,12 @@ export default function App() {
                 <li className="list-none text-amber-400">
                   กรอบทองกระพริบ = ถึงคิวแอคชั่น
                 </li>
-                <li className="list-none text-sky-400">ปุ่มลัด f/c/r ใช้กับที่ถึงคิว</li>
+                <li className="list-none text-sky-400">
+                  f Fold · c Check/Call · r Raise (Enter ยืนยัน)
+                </li>
+                <li className="list-none text-gold">
+                  Tab → พิมพ์ไพ่ด่วน AsKd / KsJhTs
+                </li>
               </ul>
               <PokerTable
                 seats={game.seats}
@@ -348,6 +384,66 @@ export default function App() {
 
           <div className="lg:col-span-2">
             <div className="flex h-full flex-col rounded-2xl border border-zinc-800/60 bg-zinc-900/30 p-4 sm:p-6">
+              {/* Quick Card Command Bar — Primary keyboard card input */}
+              <div className="mb-4 rounded-xl border border-gold/30 bg-zinc-950/70 p-3">
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <label
+                    htmlFor="quick-card-command"
+                    className="text-[11px] font-bold uppercase tracking-widest text-gold"
+                  >
+                    Quick Card · กด Tab
+                  </label>
+                  <span className="text-[10px] text-zinc-500">
+                    Enter ยืนยัน · Esc ล้าง
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    id="quick-card-command"
+                    ref={quickCardInputRef}
+                    type="text"
+                    value={quickCardText}
+                    onChange={(e) => setQuickCardText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        submitQuickCardCommand();
+                      }
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        setQuickCardText('');
+                        e.currentTarget.blur();
+                      }
+                    }}
+                    placeholder="AsKd · KsJhTs · 2s"
+                    autoComplete="off"
+                    spellCheck={false}
+                    className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-gold/60 focus:outline-none focus:ring-1 focus:ring-gold/40"
+                  />
+                  <button
+                    type="button"
+                    onClick={submitQuickCardCommand}
+                    className="shrink-0 rounded-lg bg-gold/90 px-3 py-2 text-xs font-bold text-zinc-950 hover:bg-gold"
+                  >
+                    ใส่ไพ่
+                  </button>
+                </div>
+                <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                  s = โพดำ ♠️ | h = โพแดง ❤️ | d = หลามตัด ♦️ | c = ดอกจิก ♣️
+                </p>
+                {quickCardFlash && (
+                  <p
+                    className={`mt-1.5 text-[11px] ${
+                      quickCardFlash.startsWith('ใส่ไพ่')
+                        ? 'text-emerald-400'
+                        : 'text-amber-400'
+                    }`}
+                  >
+                    {quickCardFlash}
+                  </p>
+                )}
+              </div>
+
               <CardSelector
                 stage={game.stage}
                 heroCards={game.heroCards}

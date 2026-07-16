@@ -266,8 +266,11 @@ export function useGrindingHotkeys({
         const mode: StreetMode = getSeatStreetMode(seat, maxBet);
         if (mode === 'facing') {
           cb.onUpdateSeat(s.activeSeatIndex, { betSize: maxBet });
-        } else if (mode === 'open') {
-          cb.onUpdateSeat(s.activeSeatIndex, { betSize: 0 });
+        } else {
+          // open หรือ matched → Check (คงยอดเดิมพันปัจจุบัน)
+          cb.onUpdateSeat(s.activeSeatIndex, {
+            betSize: mode === 'open' ? 0 : seat.betSize,
+          });
         }
         return;
       }
@@ -278,7 +281,12 @@ export function useGrindingHotkeys({
         return;
       }
 
-      // 1–6 ไม่ย้ายคิวแอคชั่น — โฟกัสเฉพาะที่ถึงคิวเท่านั้น (กันคลิก/คีย์สลับคน)
+      // Tab → ให้ App โฟกัส Quick Command Bar (ไม่กินที่นี่)
+      if (key === 'Tab') {
+        return;
+      }
+
+      // 1–6 โฟกัสช่อง Raise ของคนที่ถึงคิว
       if (lower >= '1' && lower <= '6') {
         e.preventDefault();
         cb.focusBetInput(s.activeSeatIndex);

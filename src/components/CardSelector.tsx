@@ -3,6 +3,7 @@ import { STAGES } from '../types';
 import type { CardSelectTarget } from '../lib/cardInput';
 import { FULL_DECK, boardCardLimit, formatCard, isRedSuit } from '../lib/cards';
 import { PlayingCard } from './PlayingCard';
+import { useState } from 'react';
 
 export type { CardSelectTarget };
 
@@ -28,6 +29,8 @@ export function CardSelector({
   onSelectBoard,
 }: CardSelectorProps) {
   const boardLimit = boardCardLimit(stage);
+  /** ตาราง 52 ใบเป็นทางเลือก — คีย์บอร์ดเป็นช่องทางหลัก */
+  const [deckOpen, setDeckOpen] = useState(false);
 
   const handleCardPick = (card: Card) => {
     if (!activeTarget) return;
@@ -121,65 +124,76 @@ export function CardSelector({
       )}
 
       <section>
-        <div className="mb-2 flex items-center justify-between">
+        <div className="mb-2 flex items-center justify-between gap-2">
           <h3 className="text-xs font-semibold uppercase tracking-widest text-zinc-400">
             เลือกไพ่
           </h3>
-          {activeTarget && (
-            <div className="flex gap-2">
-              <span className="text-xs text-gold">
-                กำลังเลือก:{' '}
-                {activeTarget.type === 'hero'
-                  ? `Hero ใบที่ ${activeTarget.slot + 1}`
-                  : `Board ใบที่ ${activeTarget.index + 1}`}
-                <span className="ml-1 text-zinc-500">· พิมพ์ AsKd ได้</span>
-              </span>
-              <button
-                type="button"
-                onClick={clearTarget}
-                className="text-xs text-red-400 hover:text-red-300"
-              >
-                ล้าง
-              </button>
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            {activeTarget && (
+              <>
+                <span className="text-xs text-gold">
+                  กำลังเลือก:{' '}
+                  {activeTarget.type === 'hero'
+                    ? `Hero ใบที่ ${activeTarget.slot + 1}`
+                    : `Board ใบที่ ${activeTarget.index + 1}`}
+                </span>
+                <button
+                  type="button"
+                  onClick={clearTarget}
+                  className="text-xs text-red-400 hover:text-red-300"
+                >
+                  ล้าง
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={() => setDeckOpen((v) => !v)}
+              className="rounded border border-zinc-700 bg-zinc-800/80 px-2 py-0.5 text-[10px] font-semibold text-zinc-300 hover:border-zinc-500 hover:text-white"
+            >
+              {deckOpen ? 'ซ่อนตาราง 52 ใบ' : 'แสดงตาราง 52 ใบ'}
+            </button>
+          </div>
         </div>
 
-        {!activeTarget && (
-          <p className="mb-2 text-xs text-zinc-500">
-            คลิกช่องไพ่ด้านบน แล้วพิมพ์รหัสไพ่ (เช่น AsKd) หรือเลือกจากกริด
-          </p>
+        <p className="mb-2 text-xs text-zinc-500">
+          ช่องทางหลัก: กด{' '}
+          <kbd className="rounded bg-zinc-800 px-1 text-gold">Tab</kbd> แล้วพิมพ์{' '}
+          <span className="font-mono text-zinc-300">AsKd</span> /{' '}
+          <span className="font-mono text-zinc-300">KsJhTs</span> แล้ว Enter
+        </p>
+
+        {deckOpen && (
+          <div className="grid grid-cols-[repeat(13,minmax(0,1fr))] gap-1 overflow-x-auto rounded-xl border border-zinc-700/50 bg-zinc-900/50 p-3">
+            {FULL_DECK.map((card) => {
+              const disabled = isCardDisabled(card);
+              const red = isRedSuit(card);
+              const { rank } = { rank: card.slice(0, -1) };
+              const symbol = formatCard(card).slice(rank.length);
+
+              return (
+                <button
+                  key={card}
+                  type="button"
+                  disabled={disabled || !activeTarget}
+                  onClick={() => handleCardPick(card)}
+                  className={`flex h-10 w-8 flex-col items-center justify-center rounded border font-mono text-[10px] font-semibold transition-all ${
+                    disabled
+                      ? 'cursor-not-allowed border-zinc-800 bg-zinc-800/30 text-zinc-600 line-through'
+                      : !activeTarget
+                        ? 'border-zinc-700 bg-zinc-800/50 text-zinc-500'
+                        : red
+                          ? 'border-zinc-600 bg-zinc-100 text-red-600 hover:scale-110 hover:ring-2 hover:ring-gold cursor-pointer'
+                          : 'border-zinc-600 bg-zinc-100 text-zinc-900 hover:scale-110 hover:ring-2 hover:ring-gold cursor-pointer'
+                  }`}
+                >
+                  <span>{rank}</span>
+                  <span className="text-xs leading-none">{symbol}</span>
+                </button>
+              );
+            })}
+          </div>
         )}
-
-        <div className="grid grid-cols-[repeat(13,minmax(0,1fr))] gap-1 overflow-x-auto rounded-xl border border-zinc-700/50 bg-zinc-900/50 p-3">
-          {FULL_DECK.map((card) => {
-            const disabled = isCardDisabled(card);
-            const red = isRedSuit(card);
-            const { rank } = { rank: card.slice(0, -1) };
-            const symbol = formatCard(card).slice(rank.length);
-
-            return (
-              <button
-                key={card}
-                type="button"
-                disabled={disabled || !activeTarget}
-                onClick={() => handleCardPick(card)}
-                className={`flex h-10 w-8 flex-col items-center justify-center rounded border font-mono text-[10px] font-semibold transition-all ${
-                  disabled
-                    ? 'cursor-not-allowed border-zinc-800 bg-zinc-800/30 text-zinc-600 line-through'
-                    : !activeTarget
-                      ? 'border-zinc-700 bg-zinc-800/50 text-zinc-500'
-                      : red
-                        ? 'border-zinc-600 bg-zinc-100 text-red-600 hover:scale-110 hover:ring-2 hover:ring-gold cursor-pointer'
-                        : 'border-zinc-600 bg-zinc-100 text-zinc-900 hover:scale-110 hover:ring-2 hover:ring-gold cursor-pointer'
-                }`}
-              >
-                <span>{rank}</span>
-                <span className="text-xs leading-none">{symbol}</span>
-              </button>
-            );
-          })}
-        </div>
       </section>
 
       <div className="flex flex-wrap gap-1">

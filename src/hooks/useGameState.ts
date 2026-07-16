@@ -21,6 +21,11 @@ import {
   type HandResolvedRef,
 } from '../lib/evTracker';
 import { STARTING_STACK_BB } from '../lib/stackCapAdvice';
+import {
+  parseQuickCardCommand,
+  planQuickCardPlacement,
+  type QuickCardApplyResult,
+} from '../lib/cardInput';
 import { computeBetContext } from '../../shared/lib/betContext';
 import {
   BIG_BLIND_BB,
@@ -480,6 +485,50 @@ export function useGameState(handResolvedRef?: HandResolvedRef) {
     });
   }, []);
 
+  /**
+   * Quick Card Text Parser — แปลง AsKd / KsJhTs / 2s แล้วเติม Hero→Board ตามช่องว่าง
+   * (ไม่แตะ server GTO engine)
+   */
+  const applyQuickCardText = useCallback(
+    (raw: string): QuickCardApplyResult => {
+      const cards = parseQuickCardCommand(raw);
+      if (!cards) {
+        return {
+          ok: false,
+          applied: 0,
+          message: 'รูปแบบไม่ถูกต้อง — ใช้เช่น AsKd, KsJhTs, 2s (s/h/d/c)',
+          filled: [],
+        };
+      }
+
+      const limit = boardCardLimit(stage);
+      const plan = planQuickCardPlacement({
+        cards,
+        heroCards,
+        boardCards,
+        boardLimit: limit,
+        usedCards,
+      });
+      if (!plan.ok) return plan;
+
+      let nextHero: [Card | null, Card | null] = [heroCards[0], heroCards[1]];
+      let nextBoard = [...boardCards];
+      for (const item of plan.filled) {
+        if (item.type === 'hero') {
+          nextHero = [...nextHero] as [Card | null, Card | null];
+          nextHero[item.slot] = item.card;
+        } else {
+          nextBoard = [...nextBoard];
+          nextBoard[item.index] = item.card;
+        }
+      }
+      setHeroCards(nextHero);
+      setBoardCards(nextBoard);
+      return plan;
+    },
+    [boardCards, heroCards, stage, usedCards],
+  );
+
   const handleStageChange = useCallback(
     (newStage: Stage) => {
       pushHistory();
@@ -638,6 +687,7 @@ export function useGameState(handResolvedRef?: HandResolvedRef) {
     selectHeroCard,
     boardCards,
     selectBoardCard,
+    applyQuickCardText,
     pot,
     basePot,
     streetPot,
